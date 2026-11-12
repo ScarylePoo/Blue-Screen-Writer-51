@@ -53,6 +53,7 @@ If you know 5.1, you already know this program:
 - **Spell check as you type** with a red underline, with automatic **per-paragraph language detection** (English, German, French, Italian, Spanish, Russian); smart quotes per language; autocorrect.
 - Latin and **Cyrillic** text, typed with any Windows keyboard layout or the classic Compose key.
 - **Windows printing** with TrueType/OpenType fonts, pictures in PNG/JPEG/BMP/GIF as well as WPG.
+- Spreadsheet import and links (Ctrl-F5 → 5) from **Excel .xlsx** and CSV, as tables or tabbed text.
 - Document information for translators: words, characters, standard lines and pages, invoice amount.
 - Large, clear letters that grow with the window; Ctrl + = / Ctrl + Shift + minus / Ctrl + 0 to zoom.
 - Optional mouse: click, drag to mark a Block, double-click a word, right-click for the menu bar.

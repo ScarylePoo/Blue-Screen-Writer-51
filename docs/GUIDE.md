@@ -215,6 +215,10 @@ Press **Ctrl-F5, 7 Document Info**. It shows:
 
 If a Block is marked, it counts only the Block.
 
+### Spreadsheets: Excel and CSV
+
+**Ctrl-F5, 5 Spreadsheet** works as in 5.1, but now reads **Excel (.xlsx)** and **CSV** files. Choose 1 Import (copy the numbers in once) or 2 Create Link (they can be refreshed later with 4 Link Options, Update All Links). At *Range* you can give cells such as *A1:D10* or a sheet name; leave it empty for the whole first sheet. The data arrives as a table.
+
 ### Comments
 
 **Ctrl-F5, 4 Comment** still creates comments, as before. Comments are exchanged with Word: comments a client writes in Word appear here, and yours appear in Word.
@@ -244,6 +248,7 @@ Your keyboard files (.WPK) are chosen in Shift-F1, **5 Keyboard Layout**.
 - **Ctrl-F5, 2**: Password
 - **Ctrl-F5, 3**: Save As (Word, PDF, ODT, RTF, HTML, text)
 - **Ctrl-F5, 4**: Comment
+- **Ctrl-F5, 5**: Spreadsheet (Excel .xlsx, CSV)
 - **Ctrl-F5, 6**: Revisions (every saved version)
 - **Ctrl-F5, 7**: Document Info (words, lines, invoice amount)
 - **Ctrl-F5, 8**: Links and bookmarks

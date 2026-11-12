@@ -350,11 +350,6 @@ fn shown_attrs(st: &State) -> AttrSet {
     a
 }
 
-fn line_height_cpt(size_cpt: u32, spacing: u32) -> i32 {
-    let h = size_cpt as i64 * 12 / 72;
-    (h * spacing as i64 / 100) as i32
-}
-
 fn line_height(font: &FontSpec, spacing: u32) -> i32 {
     // pt → WPU is *1200/72; cpt = pt*100.
     let h = font.size_cpt as i64 * 12 / 72; // WPU for 100 % spacing

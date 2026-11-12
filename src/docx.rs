@@ -284,7 +284,6 @@ const NOTE_REF_RPR: &str = "<w:rPr><w:vertAlign w:val=\"superscript\"/></w:rPr>"
 pub fn document_xml(doc: &Document, parts: &mut Parts) -> String {
     let els = crate::styles::docx_stream(doc);
     let body = body_xml(doc, &els, parts);
-    let init = &doc.init;
     let mut refs = String::new();
     for (k, (which, occ, _)) in parts.hf.iter().enumerate() {
         let tag = if *which < 2 { "headerReference" } else { "footerReference" };

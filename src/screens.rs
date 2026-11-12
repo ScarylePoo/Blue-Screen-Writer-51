@@ -196,6 +196,7 @@ impl YesNo {
     pub fn new(question: &str, default_yes: bool, f: impl FnOnce(&mut Wp, bool) -> Next + 'static) -> Box<YesNo> {
         Box::new(YesNo { question: question.into(), default_yes, on_done: Some(Box::new(f)), on_cancel: None })
     }
+    #[allow(dead_code)] // builder kept for screens that need a separate Cancel action
     pub fn on_cancel(mut self: Box<Self>, f: impl FnOnce(&mut Wp) -> Next + 'static) -> Box<Self> {
         self.on_cancel = Some(Box::new(f));
         self
@@ -290,6 +291,7 @@ impl MenuLine {
         self.prefix = p.into();
         self
     }
+    #[allow(dead_code)] // builder kept for menus with a non-zero default
     pub fn default_choice(mut self: Box<Self>, d: &str) -> Box<Self> {
         self.default = d.into();
         self
@@ -383,8 +385,3 @@ impl Screen for MenuLine {
     }
 }
 
-/// A transient message on the status line (e.g. "* Please wait *").
-pub fn message_next(wp: &mut Wp, msg: &str) -> Next {
-    wp.flash(msg);
-    None
-}

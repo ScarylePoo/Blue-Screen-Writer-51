@@ -158,13 +158,12 @@ impl Settings {
                 "comments_display" => s.comments_display = v == "yes",
                 "style_dir" => s.style_dir = p(),
                 "style_library" => s.style_library = p(),
-                k => {
-                    s.ext.load_kv(k, v);
-                }
                 "menu_bar_visible" => s.menu_bar_visible = v == "yes",
                 "menu_bar_separator" => s.menu_bar_separator = v == "yes",
                 "menu_letters" => s.menu_letters = v.to_string(),
-                _ => {}
+                k => {
+                    s.ext.load_kv(k, v);
+                }
             }
         }
         s

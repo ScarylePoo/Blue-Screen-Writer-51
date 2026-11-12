@@ -145,17 +145,6 @@ impl Form {
     pub fn new(title: &str, items: Vec<Item>) -> Box<Form> {
         Box::new(Form { title: title.into(), items, editing: None, choice: None, footer: "Selection: 0".into(), value_col: 44 })
     }
-
-    fn rows_of(&self) -> Vec<(usize, usize)> {
-        // (item, sub) per screen row
-        let mut v = vec![];
-        for (i, it) in self.items.iter().enumerate() {
-            for s in 0..it.labels.len().max(1) {
-                v.push((i, s));
-            }
-        }
-        v
-    }
 }
 
 impl Screen for Form {
@@ -743,6 +732,7 @@ pub fn text_in_out(wp: &mut Wp) {
         }
         7 => Some(crate::docinfo::link_menu()),
         3 => Some(crate::comments::menu()),
+        4 => Some(crate::sheet::spreadsheet_menu()),
         _ => {
             not_yet(wp, "This Text In/Out option");
             None

@@ -352,6 +352,7 @@ pub fn plain(els: &[El]) -> String {
 
 /// Text including nested notes/headers, tables as `|` cells — handy for
 /// asserting import results in tests.
+#[cfg(test)]
 pub fn debug_text(els: &[El]) -> String {
     let mut s = String::new();
     for e in els {

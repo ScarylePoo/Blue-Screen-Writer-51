@@ -70,11 +70,10 @@ pub fn print_menu(wp: &mut Wp) {
         }));
         return;
     }
-    wp.push(Box::new(PrintScreen { copies: 1 }));
+    wp.push(Box::new(PrintScreen {}));
 }
 
 struct PrintScreen {
-    copies: u32,
 }
 
 impl Screen for PrintScreen {

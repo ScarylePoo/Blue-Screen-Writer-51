@@ -1,7 +1,6 @@
 //! WordPerfect 5.1 macros (.WPM) — loader and player.  (Interpreter is
 //! filled in from docs/formats/wpm_wpk_set.md.)
 
-use crate::keys::{Func, Input};
 use crate::screens::*;
 use crate::ui::Wp;
 use std::path::PathBuf;
@@ -148,8 +147,4 @@ pub fn edit_prompt(wp: &mut Wp) {
         })
         .with_alt_letters(),
     );
-}
-
-pub fn is_recording_key(i: &Input) -> bool {
-    matches!(i, Input::Func(Func::MacroDefine))
 }
