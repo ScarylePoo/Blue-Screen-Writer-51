@@ -63,9 +63,9 @@ jobs:
           $tmp = Join-Path $env:RUNNER_TEMP guide
           New-Item -ItemType Directory -Force $tmp, "$tmp\cfg" | Out-Null
           Copy-Item docs\GUIDE.md $tmp
-          Push-Location $tmp
-          & "$env:GITHUB_WORKSPACE\target\release\bsw51.exe" --config "$tmp\cfg" GUIDE.md --keys '{Ctrl-F5}"31"{Enter}'
-          Pop-Location
+          # Start-Process -Wait: PowerShell does not wait for a windowed
+          # program on its own; the keys need their quotes escaped
+          Start-Process -FilePath "$env:GITHUB_WORKSPACE\target\release\bsw51.exe" -WorkingDirectory $tmp -Wait -ArgumentList '--config', "`"$tmp\cfg`"", 'GUIDE.md', '--keys', '"{Ctrl-F5}\"31\"{Enter}"'
           if (Test-Path "$tmp\GUIDE.docx") {
             Copy-Item "$tmp\GUIDE.docx" "$dir\Guide - What Is New.docx"
           } else {
