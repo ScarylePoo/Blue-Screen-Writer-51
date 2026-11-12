@@ -84,13 +84,25 @@ impl Renderer {
     }
 
     fn glyph(&mut self, ch: char, face: u8) -> &Glyph {
-        let key = (ch, face, self.px.to_bits());
+        // face bit 4: Japanese paragraph (only matters for CJK fonts)
+        let jp = face & 4 != 0;
+        let face = face & 3;
+        let key = (ch, face | if jp { 4 } else { 0 }, self.px.to_bits());
         if !self.cache.contains_key(&key) {
             let mut font = &self.fonts[face as usize];
             if font.lookup_glyph_index(ch) == 0 && face != 0 {
                 font = &self.fonts[0];
             }
-            if font.lookup_glyph_index(ch) == 0 && !ch.is_ascii() {
+            let mut px = self.px;
+            if font.lookup_glyph_index(ch) == 0 && crate::cjk::is_cjk(ch) {
+                if let Some(f) = cjk_font(ch, jp) {
+                    font = f;
+                    // fill two cells (one for halfwidth forms), not taller than a cell
+                    let cols = if crate::cjk::is_wide(ch) { 2.0 } else { 1.0 };
+                    let lm = f.horizontal_line_metrics(1.0).map(|l| l.ascent - l.descent).unwrap_or(1.2);
+                    px = (self.cell_w as f32 * cols * 0.92).min(self.cell_h as f32 / lm);
+                }
+            } else if font.lookup_glyph_index(ch) == 0 && !ch.is_ascii() {
                 if self.fallback.is_none() {
                     self.fallback = Some(load_fallback_fonts());
                 }
@@ -98,7 +110,7 @@ impl Renderer {
                     font = f;
                 }
             }
-            let (m, bitmap) = font.rasterize(ch, self.px);
+            let (m, bitmap) = font.rasterize(ch, px);
             self.cache.insert(key, Glyph { w: m.width, h: m.height, xmin: m.xmin, ymin: m.ymin, bitmap });
         }
         &self.cache[&key]
@@ -191,6 +203,7 @@ impl Renderer {
         let cw = self.cell_w;
         let chh = self.cell_h;
         for row in 0..g.rows {
+            // backgrounds first: a double-width (CJK) glyph covers two cells
             for col in 0..g.cols {
                 let cell = g.cells[row * g.cols + col];
                 let x0 = self.off_x + col * cw;
@@ -198,13 +211,20 @@ impl Renderer {
                 if x0 + cw > w || y0 + chh > h {
                     continue;
                 }
-                let bgc = cell.bg.0;
                 for y in y0..y0 + chh {
-                    let rowp = &mut buf[y * w + x0..y * w + x0 + cw];
-                    rowp.fill(bgc);
+                    buf[y * w + x0..y * w + x0 + cw].fill(cell.bg.0);
+                }
+            }
+            for col in 0..g.cols {
+                let cell = g.cells[row * g.cols + col];
+                let x0 = self.off_x + col * cw;
+                let y0 = self.off_y + row * chh;
+                if x0 + cw > w || y0 + chh > h {
+                    continue;
                 }
                 let visible = !(cell.flags & F_BLINK != 0 && !blink_on);
-                if cell.ch != ' ' && visible {
+                // '\0' = right half of a double-width character
+                if cell.ch != ' ' && cell.ch != '\0' && visible {
                     let fg = cell.fg.0;
                     if !Self::draw_box_char(buf, w, x0, y0, cw, chh, cell.ch, fg) {
                         let face = if self.typographic {
@@ -213,8 +233,13 @@ impl Renderer {
                             0
                         };
                         let ascent = self.ascent;
-                        let g = self.glyph(cell.ch, face);
-                        let gx = x0 as i32 + g.xmin + ((cw as i32 - (g.w as i32 + g.xmin.max(0))) / 2).max(0).min(1);
+                        let wide = crate::cjk::is_wide(cell.ch);
+                        let g = self.glyph(cell.ch, face | if cell.flags & F_JA != 0 { 4 } else { 0 });
+                        let gx = if wide {
+                            x0 as i32 + (2 * cw as i32 - g.w as i32) / 2
+                        } else {
+                            x0 as i32 + g.xmin + ((cw as i32 - (g.w as i32 + g.xmin.max(0))) / 2).max(0).min(1)
+                        };
                         let gy = y0 as i32 + ascent.round() as i32 - g.h as i32 - g.ymin;
                         for yy in 0..g.h {
                             let py = gy + yy as i32;
@@ -301,6 +326,35 @@ impl Renderer {
             }
         }
     }
+}
+
+thread_local! {
+    /// CJK screen fonts, loaded once per family when first needed (they are
+    /// large).  Leaked so glyph lookups can borrow them for the program's life.
+    static CJK_FONTS: std::cell::RefCell<HashMap<&'static str, Option<&'static Font>>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// The Windows CJK font for `ch` (Microsoft YaHei, Yu Gothic, Malgun Gothic …).
+fn cjk_font(ch: char, jp: bool) -> Option<&'static Font> {
+    for fam in crate::cjk::fallback_families(ch, jp) {
+        let f = CJK_FONTS.with(|m| {
+            *m.borrow_mut().entry(fam).or_insert_with(|| {
+                // on screen the heavier Medium weight reads better (Yu Gothic
+                // Regular is very thin)
+                let face = crate::fonts::installed()
+                    .iter()
+                    .find(|f| f.family.eq_ignore_ascii_case(fam) && f.style.eq_ignore_ascii_case("Medium"))
+                    .or_else(|| crate::fonts::find_face(fam, false, false))?;
+                let data = std::fs::read(&face.path).ok()?;
+                let font = Font::from_bytes(data, FontSettings { collection_index: face.index, ..FontSettings::default() }).ok()?;
+                Some(&*Box::leak(Box::new(font)))
+            })
+        });
+        if let Some(f) = f.filter(|f| f.lookup_glyph_index(ch) != 0) {
+            return Some(f);
+        }
+    }
+    None
 }
 
 /// Courier New (closest to the screen font), then Arial: together they cover

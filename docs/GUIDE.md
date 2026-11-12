@@ -159,6 +159,17 @@ Good to know:
 - Word, LibreOffice and printing show Arabic paragraphs right to left as well;
 - Hebrew is shown right to left too; for Hebrew spelling, a Hebrew dictionary can be added to the *dict* folder.
 
+### Chinese, Japanese and Korean
+
+Chinese, Japanese and Korean documents open, show and print correctly. Each of these characters takes two columns on the blue screen, as on a real Asian DOS screen. Lines break between characters (there are no spaces), and never before a closing mark such as 。 or 」. Korean breaks at spaces.
+
+- The fonts come from Windows: Microsoft YaHei for Chinese, Yu Gothic for Japanese, Malgun Gothic for Korean. A paragraph that contains Japanese kana is shown with the Japanese font.
+- When a document contains these characters, the screen uses a few more columns so that whole lines stay visible; the letters get only a little smaller. Ctrl + = and Ctrl + Shift + minus still work as usual.
+- To type Chinese or Japanese, add the language in Windows (Settings, Time & Language, Language) and switch with Windows key + Space. The input method's word list appears right next to the cursor; the text being composed is shown underlined until you confirm it.
+- Document Info counts every Chinese or Japanese character as one word, as Word does.
+- Old Chinese, Japanese and Korean text files (GBK, Big5, Shift-JIS, EUC) are recognised automatically.
+- There is no spell checking for these languages; their words are never underlined.
+
 ### Typing aids
 
 Shift-F1, 3 Environment, **T Typing Aids** has these settings, and each can be switched on or off:

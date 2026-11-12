@@ -501,6 +501,9 @@ pub fn dict_ready(lang: &str) -> bool {
 
 /// Is `word` spelled correctly in `lang`?  None while the dictionary loads.
 pub fn word_ok(lang: &str, word: &str) -> Option<bool> {
+    if lang == "CJK" {
+        return None;
+    }
     if !dict_ready(lang) {
         return None;
     }
@@ -579,6 +582,10 @@ pub fn detect_paragraph_lang(els: &[El], at: usize, default: &str) -> String {
 /// `para`: Cyrillic words are Russian; Latin words in a Russian paragraph
 /// use the default language.
 pub fn lang_for_word(para: &str, default: &str, word: &str) -> String {
+    // Chinese/Japanese/Korean: no dictionary (never marked)
+    if word.chars().any(crate::cjk::is_cjk) {
+        return "CJK".into();
+    }
     // right-to-left scripts have their own (optional) dictionaries
     if word.chars().any(|c| ('\u{590}'..='\u{5ff}').contains(&c)) {
         return "HE".into();

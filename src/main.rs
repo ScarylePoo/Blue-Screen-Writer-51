@@ -6,6 +6,7 @@ mod agile;
 mod aids;
 mod app;
 mod bidi;
+mod cjk;
 mod comments;
 mod columns;
 mod clipboard;
@@ -322,12 +323,19 @@ fn main() {
             pump(&mut wp);
             wp.after_edit();
         }
+        // like the window: CJK lines get the columns they need
+        let wide = wp.ed_ref().layout.wide_cols;
+        if wide > 80 && wp.cols == 80 {
+            let rows = wp.rows;
+            wp.resize((wide + 2).min(130) as usize, rows);
+            wp.after_edit();
+        }
         let mut g = grid::Grid::new(wp.cols, wp.rows, wp.theme.normal);
         wp.draw(&mut g);
         if let Some(d) = dump {
             let mut s = String::new();
             for r in 0..g.rows {
-                let line: String = (0..g.cols).map(|c| g.get(c, r).unwrap().ch).collect();
+                let line: String = (0..g.cols).map(|c| g.get(c, r).unwrap().ch).filter(|&ch| ch != '\0').collect();
                 s.push_str(line.trim_end());
                 s.push('\n');
             }

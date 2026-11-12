@@ -204,6 +204,8 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
         let mut extra_per_space = 0f64;
         // lines in visual (right-to-left) order: glyphs are placed one by one
         let rtl_line = crate::bidi::line_has_rtl(&line.cells);
+        // Japanese paragraph? (decided on the first CJK character)
+        let mut line_jp: Option<bool> = None;
         if just == Justify::Full && line.term == LineEnd::Soft && !rtl_line {
             let last_nonspace = line.cells.iter().rposition(|c| c.ch != ' ');
             if let Some(ln) = last_nonspace {
@@ -353,6 +355,13 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
             let (_, xpos) = line.caret_of(k);
             let size = scaled(cur_attrs, cur_font.size_cpt);
             let w = m.width(&cur_font, size, cell.ch);
+            // CJK characters the font lacks: a Windows CJK font
+            let run_font = if crate::cjk::is_cjk(cell.ch) {
+                let jp = *line_jp.get_or_insert_with(|| crate::cjk::para_japanese(&doc.els, line.start));
+                crate::fonts::font_for_char(&cur_font.name, cell.ch, jp)
+            } else {
+                cur_font.name.clone()
+            };
             let mut x = xpos + acc.round() as i32;
             if cell.ch == ' ' && extra_per_space > 0.0 {
                 acc += extra_per_space;
@@ -366,7 +375,7 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
             };
             let same = run.as_ref().is_some_and(|r| {
                 r.attrs == cur_attrs
-                    && r.font == cur_font.name
+                    && r.font == run_font
                     && r.size_cpt == size
                     && r.y == baseline + dy
                     && (!rtl_line || (r.x + r.adv.iter().sum::<i32>() - x).abs() <= 2)
@@ -375,7 +384,7 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
                 if let Some(r) = run.take() {
                     page.runs.push(r);
                 }
-                run = Some(Run { x, y: baseline + dy, text: vec![], adv: vec![], font: cur_font.name.clone(), size_cpt: size, attrs: cur_attrs });
+                run = Some(Run { x, y: baseline + dy, text: vec![], adv: vec![], font: run_font, size_cpt: size, attrs: cur_attrs });
             } else if let Some(r) = run.as_mut() {
                 // keep x continuity: the previous advance absorbs rounding
                 let expected = r.x + r.adv.iter().sum::<i32>();

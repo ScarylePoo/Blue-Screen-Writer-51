@@ -776,6 +776,10 @@ impl Spell {
             if !has_letter(&w.text) || (self.chk.ignore_numbers && has_digit(&w.text)) {
                 continue;
             }
+            // Chinese/Japanese/Korean: no dictionaries
+            if w.text.chars().any(crate::cjk::is_cjk) {
+                continue;
+            }
             // Arabic/Hebrew: no dictionary installed for them yet
             if crate::bidi::has_rtl(&w.text) && !dict_exists_for_rtl(&w.text) {
                 continue;

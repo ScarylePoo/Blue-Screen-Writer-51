@@ -1,7 +1,9 @@
 # Handoff: right-to-left (Arabic, Hebrew) and CJK (Chinese, Japanese, Korean)
 
-Status (2026-11): Blue Screen Writer 51 fully supports Latin and Cyrillic scripts. This note
-describes what is needed to add RTL and CJK, and where in the code each piece goes.
+Status (2026-11-12): **implemented** — Arabic/Hebrew in `src/bidi.rs` (shaping, UAX #9 per line,
+RTL paragraphs, docx w:bidi/w:rtl), CJK in `src/cjk.rs` (wide cells, kinsoku line breaking,
+font fallback per paragraph, IME in `src/app.rs`, CJK legacy encodings in `src/fmt_text.rs`).
+Open: vertical text, Ruby, East Asian spell checking, Hebrew dictionary.  The original plan follows.
 
 ## What already works
 * The document model is Unicode (`El::Ch(char)`), files (.docx/.odt/.rtf/.doc/WP 5.x) carry

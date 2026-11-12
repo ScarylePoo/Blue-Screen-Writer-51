@@ -52,6 +52,7 @@ If you know 5.1, you already know this program:
 **Writing**
 - **Spell check as you type** with a red underline, with automatic **per-paragraph language detection** (English, German, French, Italian, Spanish, Russian, Arabic); smart quotes per language; autocorrect.
 - Latin, **Cyrillic** and **Arabic** text (right to left, joined letters, mixed with left-to-right text, on the classic text screen as well as in print and Word files), typed with any Windows keyboard layout or the classic Compose key.
+- **Chinese, Japanese and Korean**: double-width characters on the text screen, line breaking with kinsoku rules, Windows CJK fonts on screen and in print, input methods (IME), CJK word counts, GBK/Big5/Shift-JIS/EUC text files.
 - **Windows printing** with TrueType/OpenType fonts, pictures in PNG/JPEG/BMP/GIF as well as WPG.
 - Spreadsheet import and links (Ctrl-F5 → 5) from **Excel .xlsx** and CSV, as tables or tabbed text.
 - Document information for translators: words, characters, standard lines and pages, invoice amount.

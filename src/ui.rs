@@ -2091,6 +2091,7 @@ impl Wp {
     }
 
     fn draw_line(&self, g: &mut Grid, e: &Editor, l: &crate::layout::Line, row: usize, left: i32, block: Option<(usize, usize)>, th: &Theme) {
+        let mut jp: Option<bool> = None;
         for c in &l.cells {
             let x = c.col - left;
             if x < 0 || x as usize >= g.cols {
@@ -2102,7 +2103,14 @@ impl Wp {
                     st = th.block.flags(st.flags & (F_UNDER | F_BOLD | F_ITALIC));
                 }
             }
+            if crate::cjk::is_cjk(c.ch) && *jp.get_or_insert_with(|| crate::cjk::para_japanese(&e.doc.els, l.start)) {
+                st = st.flags(st.flags | F_JA);
+            }
             g.put(x as usize, row, c.ch, st);
+            // right half of a double-width character: same colours, no glyph
+            if crate::cjk::is_wide(c.ch) && (x as usize) + 1 < g.cols {
+                g.put(x as usize + 1, row, '\0', st);
+            }
         }
         // spell check as you type: red wavy underline
         for idx in crate::aids::misspelled(self, l.start, l.end) {

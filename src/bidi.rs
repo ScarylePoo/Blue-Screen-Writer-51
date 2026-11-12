@@ -275,7 +275,7 @@ pub fn reorder_line(cells: &mut Vec<LCell>, caret: &mut [(i32, i32)], start: usi
     let mut s = 0;
     for k in 1..=keep.len() {
         let orig_col = |k: usize| keep[k].0.col;
-        if k == keep.len() || orig_col(k) > orig_col(k - 1) + 1 + absorbed_between(cells, keep[k - 1].0.el, keep[k].0.el) {
+        if k == keep.len() || orig_col(k) > orig_col(k - 1) + cw(keep[k - 1].0.ch) + absorbed_between(cells, keep[k - 1].0.el, keep[k].0.el) {
             segs.push((s, k));
             s = k;
         }
@@ -291,7 +291,7 @@ pub fn reorder_line(cells: &mut Vec<LCell>, caret: &mut [(i32, i32)], start: usi
         // original extent of the segment
         let col0 = keep[a].0.col;
         let x0 = cidx(keep[a].0.el).map(|k| old_caret[k].1).unwrap_or(b.lm);
-        let ncols = (z - a) as i32;
+        let ncols: i32 = keep[a..z].iter().map(|c| cw(c.0.ch)).sum();
         let wsum: i32 = keep[a..z].iter().map(|c| c.1).sum();
         let (mut col, mut x) = if rtl_para {
             // mirror the segment's place across the line
@@ -303,7 +303,7 @@ pub fn reorder_line(cells: &mut Vec<LCell>, caret: &mut [(i32, i32)], start: usi
             let k = a + v;
             placed[k] = (col, x);
             levels_odd[k] = lv[v].is_rtl();
-            col += 1;
+            col += cw(keep[k].0.ch);
             x += keep[k].1;
         }
     }
@@ -343,6 +343,11 @@ pub fn reorder_line(cells: &mut Vec<LCell>, caret: &mut [(i32, i32)], start: usi
         }
     }
     *cells = out;
+}
+
+/// Screen columns of a character.
+fn cw(c: char) -> i32 {
+    if crate::cjk::is_wide(c) { 2 } else { 1 }
 }
 
 /// Number of cells absorbed (ligature alefs) between two kept elements, so

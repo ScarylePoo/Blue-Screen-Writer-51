@@ -16,13 +16,35 @@ pub struct Stats {
     pub paragraphs: usize,
 }
 
+/// Words in a space-free token.  Like Word: every Chinese/Japanese
+/// character counts as one word (they are written without spaces); the
+/// other runs of letters/digits in between count as one word each.
+fn count_words(tok: &str) -> usize {
+    let mut n = 0;
+    let mut in_word = false;
+    for c in tok.chars() {
+        if crate::cjk::breaks_anywhere(c) {
+            if c.is_alphanumeric() {
+                n += 1;
+            }
+            in_word = false;
+        } else if c.is_alphanumeric() {
+            if !in_word {
+                n += 1;
+                in_word = true;
+            }
+        }
+    }
+    n
+}
+
 impl Stats {
     fn add_text(&mut self, s: &str) {
         for para in s.split(['\n', '\u{c}']) {
             if para.chars().any(|c| !c.is_whitespace()) {
                 self.paragraphs += 1;
             }
-            self.words += para.split_whitespace().filter(|w| w.chars().any(|c| c.is_alphanumeric())).count();
+            self.words += para.split_whitespace().map(count_words).sum::<usize>();
             for c in para.chars() {
                 if c == '\r' || c == '\u{ad}' {
                     continue;
@@ -411,5 +433,15 @@ mod tests {
         assert!(text.contains("Words"), "{text}");
         assert!(text.contains("Standard lines (55 characters)"), "{text}");
         assert!(text.contains("Amount at 1,10 per line"), "{text}");
+    }
+}
+
+#[cfg(test)]
+mod cjk_count_tests {
+    #[test]
+    fn cjk_characters_are_words() {
+        let d = crate::doc::Document::from_text("中文测试。 Hello world 日本語です\n한국어 문장입니다.");
+        // 中文测试 = 4, Hello world = 2, 日本語です = 5, Korean by spaces = 2
+        assert_eq!(super::stats(&d.els, false).words, 13);
     }
 }

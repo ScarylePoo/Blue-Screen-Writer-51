@@ -271,7 +271,35 @@ pub fn detect_8bit(bytes: &[u8]) -> Enc {
 /// Decode a text file with automatic encoding detection.
 pub fn decode_auto(bytes: &[u8]) -> String {
     let (enc, bom) = detect(bytes);
+    if bom == 0 && !matches!(enc, Enc::Utf8 | Enc::Utf16Le | Enc::Utf16Be) {
+        if let Some(s) = decode_cjk(bytes) {
+            return s;
+        }
+    }
     decode(&bytes[bom..], enc)
+}
+
+/// Chinese/Japanese/Korean legacy encodings (GBK, Big5, Shift-JIS, EUC-JP,
+/// EUC-KR), recognised with Firefox's detector.  Only a confident CJK
+/// guess that decodes without errors is taken; everything else goes to the
+/// 8-bit code page detection above.
+pub fn decode_cjk(bytes: &[u8]) -> Option<String> {
+    let sample = &bytes[..bytes.len().min(256 << 10)];
+    let mut det = chardetng::EncodingDetector::new();
+    det.feed(sample, sample.len() == bytes.len());
+    let enc = det.guess(None, true);
+    let cjk = [encoding_rs::GBK, encoding_rs::GB18030, encoding_rs::BIG5, encoding_rs::SHIFT_JIS, encoding_rs::EUC_JP, encoding_rs::EUC_KR, encoding_rs::ISO_2022_JP];
+    if !cjk.contains(&enc) {
+        return None;
+    }
+    let (text, had_errors) = enc.decode_without_bom_handling(bytes);
+    // the result must really be mostly CJK, not Latin text read as Han
+    let cjk_chars = text.chars().filter(|&c| crate::cjk::is_cjk(c)).count();
+    let high = text.chars().filter(|&c| !c.is_ascii()).count();
+    if had_errors || cjk_chars * 10 < high * 8 {
+        return None;
+    }
+    Some(text.into_owned())
 }
 
 #[cfg(test)]
@@ -346,5 +374,25 @@ mod tests {
     fn labels() {
         assert_eq!(enc_for_label("\"Windows-1251\""), Some(Enc::Cp1251));
         assert_eq!(enc_for_label("koi8-r"), Some(Enc::Koi8r));
+    }
+}
+
+#[cfg(test)]
+mod cjk_tests {
+    #[test]
+    fn legacy_cjk_encodings() {
+        let zh = "中文测试：这是一个用于测试的段落。我们需要足够的文字来让检测器做出判断，所以这里写得长一些。";
+        let ja = "日本語のテストです。これは文字コードの判定のための文章で、ひらがなとカタカナと漢字を含みます。";
+        let ko = "한국어 문장입니다. 문자 인코딩 감지를 위해 충분히 긴 문장을 씁니다. 단어 사이에 공백이 있습니다.";
+        for (text, enc) in [(zh, encoding_rs::GBK), (zh, encoding_rs::BIG5), (ja, encoding_rs::SHIFT_JIS), (ja, encoding_rs::EUC_JP), (ko, encoding_rs::EUC_KR)] {
+            let (bytes, _, bad) = enc.encode(text);
+            if bad {
+                continue; // simplified characters missing in Big5
+            }
+            assert_eq!(super::decode_auto(&bytes), text, "{}", enc.name());
+        }
+        // German Windows-1252 must stay German
+        let de: Vec<u8> = "Grüße aus Köln, schöne Übersetzung für Müller.".chars().map(|c| c as u32 as u8).collect();
+        assert_eq!(super::decode_auto(&de), "Grüße aus Köln, schöne Übersetzung für Müller.");
     }
 }

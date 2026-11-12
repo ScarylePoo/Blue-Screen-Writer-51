@@ -15,9 +15,9 @@ pub trait Metrics {
 pub struct MonoMetrics;
 
 impl Metrics for MonoMetrics {
-    fn width(&self, _font: &FontSpec, size_cpt: u32, _ch: char) -> i32 {
+    fn width(&self, _font: &FontSpec, size_cpt: u32, ch: char) -> i32 {
         // pt * 1200/72 * 0.6  ==  cpt * 12 * 0.6 / 72 == cpt / 10
-        (size_cpt as i32) / 10
+        (size_cpt as i32) / 10 * if crate::cjk::is_wide(ch) { 2 } else { 1 }
     }
 }
 
@@ -223,6 +223,9 @@ pub struct Layout {
     pub page_paper: Vec<Option<crate::fmt::Paper>>,
     /// Graphics boxes and where they landed (gfx.rs).
     pub boxes: Vec<crate::gfx::BoxGeom>,
+    /// Screen columns needed by the widest line that contains double-width
+    /// (CJK) characters; 0 when there are none.
+    pub wide_cols: i32,
 }
 
 impl Layout {
@@ -659,6 +662,13 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
                     let is_space = ch == ' ';
                     // Format: Printer Functions — word/letter spacing
                     let w = w * if is_space { st.fx.wrd_ltr.0.pct() } else { st.fx.wrd_ltr.1.pct() } / 100;
+                    // Chinese/Japanese: a line may break between characters
+                    // (no spaces), except where kinsoku rules forbid it
+                    if let Some(prev) = cells.last().map(|c| c.ch) {
+                        if crate::cjk::break_between(prev, ch) {
+                            last_break = Some((i, cells.len(), caret.len(), st.clone()));
+                        }
+                    }
                     if !is_space && pos + w > rm_limit && !cells.is_empty() {
                         if st.hyph && in_cell.is_none() {
                             let ws = last_break.as_ref().map(|b| b.0).unwrap_or(line_start);
@@ -721,7 +731,8 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
                     first_just.get_or_insert(st.just);
                     cells.push(LCell { col, ch, attrs: shown_attrs(&st), el: i });
                     pos += w;
-                    col += 1;
+                    // CJK characters take two screen columns
+                    col += if crate::cjk::is_wide(ch) { 2 } else { 1 };
                     let lh = st_line_height(&st, sz);
                     if lh > max_h {
                         max_h = lh;
@@ -1184,7 +1195,16 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
         hyph_ask,
         page_paper: vec![],
         boxes: std::mem::take(&mut gx.boxes),
+        wide_cols: 0,
     };
+    let mut l = l;
+    l.wide_cols = l
+        .lines
+        .iter()
+        .filter(|ln| ln.cells.iter().any(|c| crate::cjk::is_wide(c.ch)))
+        .filter_map(|ln| ln.cells.iter().map(|c| c.col + if crate::cjk::is_wide(c.ch) { 2 } else { 1 }).max())
+        .max()
+        .unwrap_or(0);
     l
 }
 

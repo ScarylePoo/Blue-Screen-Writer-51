@@ -234,6 +234,37 @@ pub fn find_face(family: &str, bold: bool, italic: bool) -> Option<&'static Font
     cands.into_iter().max_by_key(|f| want(f))
 }
 
+// ------------------------------------------------- CJK font substitution
+
+thread_local! {
+    static GLYPH_FONTS: RefCell<HashMap<String, Option<fontdue::Font>>> = RefCell::new(HashMap::new());
+}
+
+/// Does the installed font `family` have a glyph for `ch`?
+pub fn has_glyph(family: &str, ch: char) -> bool {
+    GLYPH_FONTS.with(|m| {
+        let mut m = m.borrow_mut();
+        let f = m.entry(family.to_lowercase()).or_insert_with(|| {
+            let face = find_face(family, false, false)?;
+            let data = std::fs::read(&face.path).ok()?;
+            fontdue::Font::from_bytes(data, fontdue::FontSettings { collection_index: face.index, ..Default::default() }).ok()
+        });
+        f.as_ref().is_some_and(|f| f.lookup_glyph_index(ch) != 0)
+    })
+}
+
+/// The font a character is printed with: the document font, or for
+/// Chinese/Japanese/Korean characters it lacks, a Windows CJK font
+/// (Microsoft YaHei, Yu Gothic, Malgun Gothic …), as Word does.
+pub fn font_for_char(family: &str, ch: char, jp: bool) -> String {
+    if crate::cjk::is_cjk(ch) && !has_glyph(family, ch) {
+        if let Some(f) = crate::cjk::fallback_family(ch, jp) {
+            return f.to_string();
+        }
+    }
+    family.to_string()
+}
+
 // ----------------------------------------------------------------- metrics
 
 /// Widths from the real TrueType font, so line breaks match the printout.
@@ -257,6 +288,10 @@ impl TtfMetrics {
         });
         let font = f.as_ref()?;
         Some(if font.lookup_glyph_index(ch) == 0 && ch != ' ' {
+            // printed with a CJK fallback font: full width
+            if crate::cjk::is_wide(ch) {
+                return Some(1.0);
+            }
             font.metrics('n', 1000.0).advance_width / 1000.0
         } else {
             font.metrics(ch, 1000.0).advance_width / 1000.0

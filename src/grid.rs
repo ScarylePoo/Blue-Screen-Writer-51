@@ -37,6 +37,8 @@ pub const F_STRIKE: u8 = 16;
 pub const F_BLINK: u8 = 32;
 /// Misspelled (spell check as you type): red wavy underline.
 pub const F_SPELL: u8 = 64;
+/// The cell belongs to a Japanese paragraph (CJK font choice).
+pub const F_JA: u8 = 128;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cell {

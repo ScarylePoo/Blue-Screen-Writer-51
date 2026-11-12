@@ -9,7 +9,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 use winit::application::ApplicationHandler;
 use winit::dpi::LogicalSize;
-use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{ElementState, Ime, KeyEvent, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 use winit::platform::modifier_supplement::KeyEventExtModifierSupplement;
@@ -33,6 +33,8 @@ struct App {
     mouse_down: bool,
     last_click: Option<(Instant, usize, usize)>,
     last_cell: (usize, usize),
+    /// Input method (Chinese/Japanese/Korean IME): text being composed
+    ime_preedit: String,
 }
 
 /// Translate a winit key event into our key model.
@@ -114,7 +116,9 @@ impl App {
         }
         // grid size: classic 80×25(+) or "fit" (grows with the window)
         let (cols, rows) = self.grid_size(wd, ht);
-        let (Some(w), Some(surface)) = (self.window.as_ref(), self.surface.as_mut()) else { return };
+        if self.window.is_none() || self.surface.is_none() {
+            return;
+        }
         if cols != self.wp.cols || rows != self.wp.rows {
             self.wp.resize(cols, rows);
         }
@@ -124,6 +128,7 @@ impl App {
         self.renderer.typographic = self.wp.settings.typographic;
         self.renderer.fit(wd, ht, self.grid.cols, self.grid.rows);
         self.wp.draw(&mut self.grid);
+        self.draw_preedit();
         if self.buf.len() != wd * ht {
             self.buf = vec![0; wd * ht];
         }
@@ -131,12 +136,42 @@ impl App {
         self.renderer.render(&self.grid, &mut self.buf, wd, ht, self.blink_on, bg);
         let ch = self.renderer.cell_h;
         self.wp.draw_pixels(&mut self.buf, wd, ht, ch);
+        let (Some(w), Some(surface)) = (self.window.as_ref(), self.surface.as_mut()) else { return };
         surface.present(&self.buf, wd, ht);
         let title = crate::window_title(&self.wp);
         w.set_title(&title);
     }
 
     /// How many columns/rows the window shows.
+    /// Show the IME composition at the cursor (underlined) and put the
+    /// candidate window right below it.
+    fn draw_preedit(&mut self) {
+        let Some((cc, cr)) = self.grid.cursor else { return };
+        if let Some(w) = &self.window {
+            let x = self.renderer.off_x + cc * self.renderer.cell_w;
+            let y = self.renderer.off_y + cr * self.renderer.cell_h;
+            w.set_ime_cursor_area(winit::dpi::PhysicalPosition::new(x as i32, y as i32), winit::dpi::PhysicalSize::new(self.renderer.cell_w as u32, self.renderer.cell_h as u32));
+        }
+        if self.ime_preedit.is_empty() {
+            return;
+        }
+        let st = self.wp.theme.normal.flags(crate::grid::F_UNDER);
+        let mut col = cc;
+        for ch in self.ime_preedit.chars() {
+            let wide = crate::cjk::is_wide(ch);
+            if col + wide as usize >= self.grid.cols {
+                break;
+            }
+            self.grid.put(col, cr, ch, st);
+            col += 1;
+            if wide {
+                self.grid.put(col, cr, '\0', st);
+                col += 1;
+            }
+        }
+        self.grid.cursor = Some((col.min(self.grid.cols - 1), cr));
+    }
+
     fn grid_size(&self, w: usize, h: usize) -> (usize, usize) {
         let s = &self.wp.settings;
         if s.screen_mode == "classic" {
@@ -154,8 +189,12 @@ impl App {
             by_height.max(15.0).min(by_width)
         } else {
             // large letters like the classic screen: 80 columns fill the
-            // window width (and at least 25 lines fit)
-            let by_width = w as f32 / (80.0 * aspect);
+            // window width (and at least 25 lines fit).  Chinese/Japanese
+            // lines are wider on screen than on paper (two columns per
+            // character): then just enough columns for the widest line.
+            let wide = self.wp.ed_ref().layout.wide_cols;
+            let want = if wide > 80 { (wide + 2).min(130) as f32 } else { 80.0 };
+            let by_width = w as f32 / (want * aspect);
             let by_height = h as f32 / 25.0;
             by_width.min(by_height)
         };
@@ -228,6 +267,8 @@ impl ApplicationHandler for App {
             .with_min_inner_size(LogicalSize::new(400.0, 250.0))
             .with_window_icon(winit::window::Icon::from_rgba(crate::register::icon_rgba(64), 64, 64).ok());
         let w = Rc::new(el.create_window(attrs).expect("create window"));
+        // Chinese/Japanese/Korean input methods (and the Windows emoji panel)
+        w.set_ime_allowed(true);
         let surface = crate::present::Presenter::new(w.clone());
         self.window = Some(w);
         self.surface = Some(surface);
@@ -263,7 +304,27 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::ModifiersChanged(m) => self.mods = m.state(),
+            WindowEvent::Ime(ime) => {
+                match ime {
+                    Ime::Preedit(text, _) => self.ime_preedit = text,
+                    Ime::Commit(text) => {
+                        self.ime_preedit.clear();
+                        for c in text.chars() {
+                            self.handle_key(KeyIn { k: K::Char(c), m: Mods::default() });
+                        }
+                    }
+                    Ime::Disabled => self.ime_preedit.clear(),
+                    Ime::Enabled => {}
+                }
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
+            }
             WindowEvent::KeyboardInput { event, is_synthetic: false, .. } => {
+                // while the input method composes, keys belong to it
+                if !self.ime_preedit.is_empty() {
+                    return;
+                }
                 if event.state == ElementState::Pressed {
                     if let Some(ki) = convert(&event, self.mods) {
                         // zoom keys (not used by the classic keyboard)
@@ -416,6 +477,7 @@ pub fn run(wp: Wp) {
         mouse_down: false,
         last_click: None,
         last_cell: (0, 0),
+        ime_preedit: String::new(),
     };
     let _ = default_map;
     el.run_app(&mut app).expect("run");
