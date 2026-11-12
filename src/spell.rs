@@ -99,6 +99,10 @@ fn search_dirs(sub: &str) -> Vec<PathBuf> {
     if let Ok(exe) = std::env::current_exe() {
         if let Some(d) = exe.parent() {
             v.push(d.join(sub));
+            // macOS app bundle: Contents/MacOS/bsw51 → Contents/Resources
+            if let Some(c) = d.parent() {
+                v.push(c.join("Resources").join(sub));
+            }
         }
     }
     v.push(crate::settings::config_dir().join(sub));

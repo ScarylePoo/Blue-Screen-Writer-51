@@ -117,6 +117,10 @@ fn find(name: &str) -> Option<PathBuf> {
         if let Some(d) = exe.parent() {
             dirs.push(d.join("hyph"));
             dirs.push(d.join("assets").join("hyph"));
+            // macOS app bundle
+            if let Some(c) = d.parent() {
+                dirs.push(c.join("Resources").join("hyph"));
+            }
         }
     }
     dirs.push(crate::settings::config_dir().join("hyph"));

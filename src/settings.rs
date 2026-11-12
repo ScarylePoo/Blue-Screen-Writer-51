@@ -242,6 +242,17 @@ impl Settings {
                     wp.macro_dirs.push(dir.to_path_buf());
                 }
             }
+            // also the settings folder (macOS/Linux: the program folder may
+            // not be writable)
+            wp.macro_dirs.push(config_dir().join("WPM"));
+            // macOS: never record into the app bundle — the settings folder first
+            #[cfg(target_os = "macos")]
+            {
+                let d = config_dir().join("WPM");
+                let _ = std::fs::create_dir_all(&d);
+                wp.macro_dirs.retain(|x| x != &d);
+                wp.macro_dirs.insert(0, d);
+            }
         }
         wp.alternate_keys = self.alternate_keys;
         wp.keyboard = None;

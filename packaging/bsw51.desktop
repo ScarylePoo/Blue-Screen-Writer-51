@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Blue Screen Writer 51
+Comment=Word processor with the WordPerfect 5.1 for DOS experience
+Exec="/path/to/Blue Screen Writer 51/bsw51" %f
+Icon=/path/to/Blue Screen Writer 51/bsw51.png
+Terminal=false
+Categories=Office;WordProcessor;
+MimeType=application/vnd.openxmlformats-officedocument.wordprocessingml.document;application/msword;application/rtf;application/vnd.oasis.opendocument.text;application/vnd.wordperfect;text/plain;
