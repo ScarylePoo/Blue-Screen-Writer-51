@@ -89,11 +89,12 @@ pub fn para_japanese(els: &[crate::doc::El], at: usize) -> bool {
 /// (`jp`: the paragraph is Japanese).
 pub fn fallback_families(c: char, jp: bool) -> &'static [&'static str] {
     if is_hangul(c) {
-        &["Malgun Gothic", "Gulim", "Batang", "Microsoft YaHei"]
+        // Windows, then macOS, then Linux fonts
+        &["Malgun Gothic", "Gulim", "Batang", "Apple SD Gothic Neo", "AppleGothic", "Noto Sans CJK KR", "Noto Sans KR", "NanumGothic", "UnDotum", "Microsoft YaHei", "Noto Sans CJK SC"]
     } else if is_kana(c) || jp {
-        &["Yu Gothic", "MS Gothic", "Meiryo", "MS Mincho", "Microsoft YaHei", "SimSun"]
+        &["Yu Gothic", "MS Gothic", "Meiryo", "MS Mincho", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans CJK JP", "Noto Sans JP", "IPAGothic", "TakaoGothic", "VL Gothic", "Microsoft YaHei", "SimSun", "Noto Sans CJK SC"]
     } else {
-        &["Microsoft YaHei", "SimSun", "MS Gothic", "Yu Gothic", "Microsoft JhengHei", "MingLiU", "Malgun Gothic"]
+        &["Microsoft YaHei", "SimSun", "MS Gothic", "Yu Gothic", "Microsoft JhengHei", "MingLiU", "Malgun Gothic", "PingFang SC", "Hiragino Sans GB", "STHeiti", "Heiti SC", "Noto Sans CJK SC", "Noto Sans SC", "WenQuanYi Micro Hei", "WenQuanYi Zen Hei", "AR PL UMing CN", "Droid Sans Fallback", "Noto Sans CJK JP"]
     }
 }
 

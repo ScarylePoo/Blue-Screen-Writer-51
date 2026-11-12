@@ -361,13 +361,12 @@ fn cjk_font(ch: char, jp: bool) -> Option<&'static Font> {
 /// Hebrew, Arabic, Greek, Cyrillic and most symbols.
 fn load_fallback_fonts() -> Vec<Font> {
     let mut v = vec![];
-    for name in ["cour.ttf", "arial.ttf", "seguisym.ttf"] {
-        for d in crate::fonts::font_dirs() {
-            if let Ok(b) = std::fs::read(d.join(name)) {
-                if let Ok(f) = Font::from_bytes(b, FontSettings::default()) {
-                    v.push(f);
-                    break;
-                }
+    // Windows, macOS and Linux names
+    for fam in ["Courier New", "Arial", "Segoe UI Symbol", "Arial Unicode MS", "DejaVu Sans", "FreeSerif", "Noto Sans Hebrew", "Noto Sans Arabic", "Noto Sans Symbols"] {
+        let Some(face) = crate::fonts::find_face(fam, false, false) else { continue };
+        if let Ok(b) = std::fs::read(&face.path) {
+            if let Ok(f) = Font::from_bytes(b, FontSettings { collection_index: face.index, ..FontSettings::default() }) {
+                v.push(f);
             }
         }
     }
