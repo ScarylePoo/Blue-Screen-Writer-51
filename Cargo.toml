@@ -1,6 +1,6 @@
 [package]
 name = "bsw51"
-version = "1.1.0"
+version = "1.1.1"
 edition = "2024"
 description = "Blue Screen Writer 51 - a native word processor with the WordPerfect 5.1 for DOS experience"
 
