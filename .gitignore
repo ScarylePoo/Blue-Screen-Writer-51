@@ -1,0 +1,8 @@
+target/
+test-out/
+*.bk!
+~*.wptmp
+target-*/
+dist/
+.claude/
+private/

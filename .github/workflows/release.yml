@@ -1,0 +1,86 @@
+name: Release
+
+# Push a tag like v0.2.0 to build and publish a release, or start it by hand
+# from the Actions tab (then give the version, e.g. 0.2.0).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version number without the v (e.g. 0.2.0)"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version
+        id: ver
+        run: |
+          $v = if ("${{ github.event_name }}" -eq "push") { "${{ github.ref_name }}".TrimStart("v") } else { "${{ inputs.version }}" }
+          "version=$v" >> $env:GITHUB_OUTPUT
+          # put the version into the program (shown in Explorer -> Properties)
+          (Get-Content Cargo.toml -Raw) -replace '(?m)^version = ".*"', "version = `"$v`"" | Set-Content Cargo.toml -NoNewline
+
+      - name: Rust (x86_64-pc-windows-gnu)
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal
+          rustup default stable-x86_64-pc-windows-gnu
+          rustc -vV
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --release
+
+      - name: Build
+        run: cargo build --release
+
+      - name: Package
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $dir = "pkg\Blue Screen Writer 51"
+          New-Item -ItemType Directory -Force $dir, "$dir\WPM" | Out-Null
+          Copy-Item target\release\bsw51.exe $dir
+          Copy-Item -Recurse assets\dict, assets\thes, assets\hyph $dir
+          Copy-Item assets\fonts\DejaVu-LICENSE.txt $dir
+          Copy-Item LICENSE "$dir\LICENSE.txt"
+          Copy-Item packaging\README.txt "$dir\READ ME.txt"
+          "Put your own macros (.WPM) and keyboard files (.WPK) in this folder." | Set-Content "$dir\WPM\README.txt"
+
+          # the guide for 5.1 users as a Word document, converted by the program itself
+          $tmp = Join-Path $env:RUNNER_TEMP guide
+          New-Item -ItemType Directory -Force $tmp, "$tmp\cfg" | Out-Null
+          Copy-Item docs\GUIDE.md $tmp
+          Push-Location $tmp
+          & "$env:GITHUB_WORKSPACE\target\release\bsw51.exe" --config "$tmp\cfg" GUIDE.md --keys '{Ctrl-F5}"31"{Enter}'
+          Pop-Location
+          if (Test-Path "$tmp\GUIDE.docx") {
+            Copy-Item "$tmp\GUIDE.docx" "$dir\Guide - What Is New.docx"
+          } else {
+            Write-Warning "guide conversion failed; shipping the Markdown version"
+            Copy-Item docs\GUIDE.md "$dir\Guide - What Is New.md"
+          }
+
+          Compress-Archive -Path $dir -DestinationPath "BlueScreenWriter51-$v-windows-x64.zip"
+          Get-ChildItem *.zip
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.ver.outputs.version }}"
+          $notes = @"
+          Unzip anywhere and double-click **bsw51.exe** (Windows 10/11, 64-bit). No installation needed.
+          Keep the folders dict, thes, hyph and WPM next to the program. New to the extras? Open *Guide - What Is New.docx*.
+          "@
+          gh release create "v$v" "BlueScreenWriter51-$v-windows-x64.zip" --title "Blue Screen Writer 51 $v" --notes $notes --target "${{ github.sha }}"

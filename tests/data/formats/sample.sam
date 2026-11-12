@@ -1,0 +1,21 @@
+[ver]
+	4
+[sty]
+	
+[charset]
+	ANSI
+[fnt]
+	0
+	100
+	Times New Roman
+[edoc]
+@Title@Überschrift
+
+@Body Text@Grüße aus Köln, <+!>fett<-!> und <+">kursiv<-"> <<Caf<\i>>.<:#1,3600>
+
+@Body Text@Zweiter Absatz über
+zwei Zeilen.
+
+[ftnote]
+1 Fußnote hier.
+

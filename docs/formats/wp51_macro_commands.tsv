@@ -1,0 +1,68 @@
+code	command	args	syntax (WP.MRS command list)	semantics	uses_in_her_files
+0xFC00	{INVALID}	0	(not displayable)	Placeholder name for an invalid command code; never stored in valid macros.	0
+0xFC01	{ASSIGN}	2	{ASSIGN}var~expr~	Evaluate expr (integer arithmetic if it parses as an expression, else string) and store in var. var 0-9 = {VAR n}. Empty expr deletes var.	1256
+0xFC02	{BELL}	0	{BELL}	Sound the bell (beep).	15
+0xFC03	{BREAK}	0	{BREAK}	Leave the innermost IF/WHILE/FOR block (continue after its END IF/END WHILE/END FOR).	2
+0xFC04	{CALL}	1	{CALL}label~	Call subroutine at {LABEL}label~; {RETURN} comes back here.	145
+0xFC05	{CANCEL OFF}	0	{CANCEL OFF}	Ignore the Cancel key (F1) while the macro runs.	4
+0xFC06	{CANCEL ON}	0	{CANCEL ON}	Re-enable the Cancel key.	0
+0xFC07	{CASE}	list	{CASE}expr~cs1~lb1~...~	Evaluate expr; compare with each case value; GO to the label of the first match. {OTHERWISE} as a case value = default. List ends with an empty argument (extra ~).	107
+0xFC08	{CASE CALL}	list	{CASE CALL}expr~cs1~lb1~...~	As CASE, but CALLs the label (returns afterwards).	12
+0xFC09	{CHAIN}	1	{CHAIN}macroname~	Run macroname (.WPM added) after the current macro finishes (chain; only last CHAIN wins).	0
+0xFC0A	{CHAR}	2	{CHAR}var~message~	Show message on status line, wait for ONE keystroke, store it in var.	42
+0xFC0B	{;}	1	{;}comment~	Comment: everything up to the matching ~ is ignored.	562
+0xFC0C	{DISPLAY OFF}	0	{DISPLAY OFF}	Stop updating the screen while the macro runs.	425
+0xFC0D	{DISPLAY ON}	0	{DISPLAY ON}	Resume screen updating.	68
+0xFC0E	{ELSE}	0	{ELSE}	Else branch of IF / IF EXISTS.	151
+0xFC0F	{END FOR}	0	{END FOR}	End of FOR / FOR EACH loop.	14
+0xFC10	{END IF}	0	{END IF}	End of IF.	369
+0xFC11	{END WHILE}	0	{END WHILE}	End of WHILE loop.	37
+0xFC12	{FOR}	4	{FOR}var~start~stop~step~	Counted loop: var = start; while var<=stop (>= for negative step) run body; var += step.	14
+0xFC13	{FOR EACH}	list	{FOR EACH}var~expr1~...exprN~~	Run loop body once per expression, assigning each value to var. List ends with an empty argument (~~).	0
+0xFC14	{GO}	1	{GO}label~	Jump to {LABEL}label~ (search whole macro).	808
+0xFC15	{IF}	1	{IF}expr~	If expr is true (non-zero) run following block up to {ELSE}/{END IF}.	360
+0xFC16	{LABEL}	1	{LABEL}label~	Define a jump target; no action when executed.	1037
+0xFC17	{LOOK}	1	{LOOK}var~	Like CHAR but does not wait: if a key is waiting store it in var, else var is emptied/deleted.	40
+0xFC18	{NEST}	1	{NEST}macroname~	Run macroname as a nested macro, then continue after this command.	4
+0xFC19	{NEXT}	0	{NEXT}	Skip to the next iteration of the innermost FOR/FOR EACH/WHILE.	0
+0xFC1A	{SHELL MACRO}	1	{SHELL MACRO}macroname~	Run a WordPerfect Office Shell macro (only under Shell; otherwise error/ignored).	0
+0xFC1B	{ON CANCEL}	1	{ON CANCEL}action~	Install handler for Cancel: action is {GO}x~ / {CALL}x~ / {RETURN}… / {QUIT}/{RESTART}; empty action = ignore.	12
+0xFC1C	{ON ERROR}	1	{ON ERROR}action~	Install handler for error conditions (e.g. file not found).	17
+0xFC1D	{ON NOT FOUND}	1	{ON NOT FOUND}action~	Install handler for search Not Found.	30
+0xFC1E	{PAUSE}	0	{PAUSE}	Pause for user keyboard input until Enter (Enter is consumed); keystrokes go to WP.	11
+0xFC1F	{PROMPT}	1	{PROMPT}message~	Display message on the status line (stays until overwritten/cleared).	128
+0xFC20	{QUIT}	0	{QUIT}	Terminate all macros immediately.	104
+0xFC21	{RESTART}	0	{RESTART}	Terminate all nesting at end of current (sub)macro: no return to callers.	0
+0xFC22	{RETURN}	0	{RETURN}	Return from CALL/NEST/handler; at top level ends the macro.	142
+0xFC23	{RETURN CANCEL}	0	{RETURN CANCEL}	Return and signal a Cancel condition to the caller (its ON CANCEL fires).	0
+0xFC24	{RETURN ERROR}	0	{RETURN ERROR}	Return and signal an Error condition to the caller (its ON ERROR fires).	0
+0xFC25	{RETURN NOT FOUND}	0	{RETURN NOT FOUND}	Return and signal Not Found to the caller (its ON NOT FOUND fires). Name table spells it RETURN NOT FND; editor/command list: RETURN NOT FOUND.	0
+0xFC26	{SPEED}	1	{SPEED}100ths second~	Delay between macro keystrokes in 1/100 s (0 = full speed).	13
+0xFC27	{STEP ON}	0	{STEP ON}	Turn single-step debugging on (each token shown, wait for key).	0
+0xFC28	{TEXT}	2	{TEXT}var~message~	Show message, read a line of text until Enter, store in var.	6
+0xFC29	{STATE}	0	{STATE}	Function: expands to the current WP state bitmask (used inside expressions).	133
+0xFC2A	{WAIT}	1	{WAIT}10ths second~	Wait n tenths of a second.	56
+0xFC2B	{WHILE}	1	{WHILE}expr~	Loop while expr is true, block ends at {END WHILE}.	37
+0xFC2C	{Macro Commands}	0	{Macro Commands}	The Ctrl-PgUp key (macro-commands key). In the macro editor it opens the command list; in a running macro it is a keystroke that opens the Pause/Display/Assign/Comment prompt.	5
+0xFC2D	{STEP OFF}	0	{STEP OFF}	Turn single-step debugging off.	1
+0xFC2E	{ORIGINAL KEY}	0	{ORIGINAL KEY}	Perform the original (unremapped, default-keyboard) action of the key that invoked the current keyboard macro.	1
+0xFC2F	{IF EXISTS}	1	{IF EXISTS}var~	True if var exists (has been assigned); followed by block/{ELSE}/{END IF} like IF.	10
+0xFC30	{MENU OFF}	0	{MENU OFF}	Suppress display of menus (prompt lines) during the macro.	2
+0xFC31	{MENU ON}	0	{MENU ON}	Re-enable menu display.	2
+0xFC32	{STATUS PROMPT}	1	{STATUS PROMPT}message~	Display a persistent status-line message (shown until another STATUS PROMPT or exit); empty message clears.	7
+0xFC33	{INPUT}	1	{INPUT}message~	Display message and pause for input until Enter (like PAUSE with a prompt).	1
+0xFC34	{VARIABLE}	1	{VARIABLE}var~	Expands to the contents of var (typed as keystrokes in plain text, textual substitution inside expressions).	580
+0xFC35	{SYSTEM}	1	{SYSTEM}sysvar~	Expands to the value of a system variable (number 1-29 or name, see spec).	207
+0xFC36	{MID}	3	{MID}var~offset~count~	Expands to substring of var: count characters starting at offset (0-based).	23
+0xFC37	{NTOK}	1	{NTOK}number~	Expands to the keystroke whose numeric code is number (inverse of KTON).	7
+0xFC38	{KTON}	1	{KTON}key~	Expands to the numeric code of key (first keystroke of the argument).	11
+0xFC39	{LEN}	1	{LEN}var~	Expands to length (in characters/keystrokes) of the contents of var.	20
+0xFC3A	{~}	0	{~}	A literal tilde character (so that ~ can be used inside strings without terminating the argument).	2
+0xFC3B	{PAUSE KEY}	1	{PAUSE KEY}key~	Pause until the specified key is pressed (the key is consumed); other keys go to WP.	0
+0xFC3C	{UNKNOWN}	0	(not displayable)	Placeholder for an unknown command; never stored.	0
+0xFC3D	{OTHERWISE}	0	{OTHERWISE}	Used as a case value inside CASE/CASE CALL: matches anything (default branch).	0
+0xFC3E	{SHELL ASSIGN}	2	{SHELL ASSIGN}shellvar~expr~	Assign expr to a WP Office Shell clipboard variable.	0
+0xFC3F	{SHELL VARIABLE}	1	{SHELL VARIABLE}shellvar~	Expands to the contents of a Shell variable.	0
+0xFD01-0xFDFF	{KEY MACRO n}	0	{KEY MACRO n}	Run keyboard macro n of the current .WPK (packet 2).	-
+0xFE41-0xFE5A	{ALT x}	0	{ALT x}	Run macro file ALTx.WPM (from keyboard/macro directory).	-
+0xFF00-0xFF09	{VAR n}	0	{VAR n}	Type the contents of variable n (Alt-n).	265

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE abiword PUBLIC "-//ABISOURCE//DTD AWML 1.0 Strict//EN" "http://www.abisource.com/awml.dtd">
+<abiword template="false" xmlns="http://www.abisource.com/awml.dtd" xml:space="preserve" version="2.8.6" fileformat="1.1">
+<metadata>
+<m key="dc.title">Testbrief</m>
+<m key="dc.creator">Maria</m>
+</metadata>
+<styles>
+<s type="P" name="Normal" props="font-family:Liberation Serif; font-size:12pt; text-align:left"/>
+<s type="P" name="Heading 1" basedon="Normal" props="font-weight:bold; font-size:17pt; text-align:center"/>
+</styles>
+<pagesize pagetype="A4" orientation="portrait" width="210.000000" height="297.000000" units="mm" page-scale="1.000000"/>
+<section props="page-margin-left:1.25in; page-margin-right:1in" header="h1">
+<p style="Heading 1">Überschrift</p>
+<p style="Normal">Grüße aus Köln, <c props="font-weight:bold">fett</c> und <c props="font-style:italic">kursiv</c>.</p>
+<p style="Normal" props="text-align:center">Привет мир<field type="footnote_ref" footnote-id="1"/><foot footnote-id="1"><p style="Footnote Text"><field type="footnote_anchor" footnote-id="1"/>Fußnote hier.</p></foot></p>
+<table props="table-column-props:1.5in/2in/; table-column-leftpos:0in">
+<cell props="bot-attach:1; left-attach:0; right-attach:1; top-attach:0"><p style="Normal">A1</p></cell>
+<cell props="bot-attach:1; left-attach:1; right-attach:2; top-attach:0"><p style="Normal">B1</p></cell>
+<cell props="bot-attach:2; left-attach:0; right-attach:1; top-attach:1"><p style="Normal">A2</p></cell>
+<cell props="bot-attach:2; left-attach:1; right-attach:2; top-attach:1"><p style="Normal">Ä2</p></cell>
+</table>
+<p style="Normal">Ende.<pbr/></p>
+<p style="Normal">Seite 2</p>
+</section>
+<section id="h1" type="header">
+<p style="Normal">Kopfzeile</p>
+</section>
+</abiword>

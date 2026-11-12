@@ -1,0 +1,132 @@
+code	name	default_keys(US/WP.MRS table)	evidence/confidence
+0x0000	(end of macro)		terminator of every macro body; high
+0x0002	(unknown leading marker)		only as 1st word of 17 keyboard macros in SHORTCUT.WPK/MACROS.WPK; treat as no-op; LOW (meaning unknown)
+0x0009	<TAB> (editor formatting)		macro-editor indentation, ignored on playback; 5306 uses; high
+0x000A	<NEWLINE> (editor formatting)		macro-editor hard line break, ignored on playback; 8006 uses; high
+0x000D	<SOFT NEWLINE> (editor formatting)		macro-editor soft wrap, appears mid-keystroke-runs in long lines; ignored on playback; 124 uses; medium-high
+0x0020-0x007E	literal ASCII character (typed text; 0x007E "~" = argument terminator)		high
+0x0100-0x0CFF	WP character (set=hi byte, index=lo byte), e.g. 0x011F = 1,31 a-umlaut		verified vs 28 accent-macro descriptions; high
+0x8000	{Compose}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8001	{^A}	Ctrl-A	WP.MRS name table; used 17 times in 3 files; high
+0x8002	{^B}	Ctrl-B	WP.MRS name table; used 3 times in 2 files; high
+0x8003	{^C}	Ctrl-C	WP.MRS name table; used 2 times in 2 files; high
+0x8004	{^D}	Ctrl-D	WP.MRS name table; used 5 times in 3 files; high
+0x8005	{^E}	Ctrl-E	WP.MRS name table; used 5 times in 3 files; high
+0x8006	{^F}	Ctrl-F	WP.MRS name table; used 5 times in 3 files; high
+0x8007	{^G}	Ctrl-G	WP.MRS name table; used 5 times in 3 files; high
+0x8008	{Home}	Home, Ctrl-H, Grey Home [E0-prefixed (grey) keys]	WP.MRS name table; used 1016 times in 82 files; high
+0x8009	{Tab}	Ctrl-I, Tab [ASCII+scan overrides]	WP.MRS name table; used 30 times in 10 files; high
+0x800A	{Enter}	Ctrl-J, Enter [ASCII+scan overrides], KeypadEnter [ASCII+scan overrides]	WP.MRS name table; used 1184 times in 208 files; high
+0x800B	{Del to EOL}	Ctrl-End, Ctrl-K, Grey Ctrl-End [E0-prefixed (grey) keys]	WP.MRS name table; used 47 times in 24 files; high
+0x800C	{Del to EOP}	Ctrl-PgDn, Ctrl-L, Grey Ctrl-PgDn [E0-prefixed (grey) keys]	WP.MRS name table; used 41 times in 7 files; high
+0x800D	{^M}	Ctrl-M	WP.MRS name table; used 17 times in 2 files; high
+0x800E	{^N}	Ctrl-N	WP.MRS name table; used 35 times in 7 files; high
+0x800F	{^O}	Ctrl-O	WP.MRS name table; used 33 times in 6 files; high
+0x8010	{^P}	Ctrl-P	WP.MRS name table; used 176 times in 8 files; high
+0x8011	{^Q}	Ctrl-Q	WP.MRS name table; used 186 times in 9 files; high
+0x8012	{^R}	Ctrl-R	WP.MRS name table; used 17 times in 2 files; high
+0x8013	{^S}	Ctrl-S	WP.MRS name table; not used in her files; high
+0x8014	{^T}	Ctrl-T	WP.MRS name table; used 6 times in 1 files; high
+0x8015	{^U}	Ctrl-U	WP.MRS name table; not used in her files; high
+0x8016	{^V}	Ctrl-V	WP.MRS name table; used 155 times in 61 files; high
+0x8017	{Up}	Up, Ctrl-W, Grey Up [E0-prefixed (grey) keys]	WP.MRS name table; used 503 times in 56 files; high
+0x8018	{Right}	Right, Ctrl-X, Grey Right [E0-prefixed (grey) keys]	WP.MRS name table; used 205 times in 28 files; high
+0x8019	{Left}	Left, Ctrl-Y, Grey Left [E0-prefixed (grey) keys]	WP.MRS name table; used 327 times in 77 files; high
+0x801A	{Down}	Down, Ctrl-Z, Grey Down [E0-prefixed (grey) keys]	WP.MRS name table; used 257 times in 52 files; high
+0x801B	{Esc}	Ctrl-[, Esc [ASCII+scan overrides]	WP.MRS name table; used 7 times in 2 files; high
+0x801C	{^\}	Ctrl-\	WP.MRS name table; used 85 times in 8 files; high
+0x801D	{^]}	Ctrl-]	WP.MRS name table; used 129 times in 8 files; high
+0x801E	{Keyboard}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x801F	{^_}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8020	{Cancel}	F1	WP.MRS name table; used 83 times in 43 files; high
+0x8021	{Search}	F2	WP.MRS name table; used 1001 times in 79 files; high
+0x8022	{Help}	F3	WP.MRS name table; used 13 times in 5 files; high
+0x8023	{Indent}	F4	WP.MRS name table; used 9 times in 5 files; high
+0x8024	{List}	F5	WP.MRS name table; used 70 times in 68 files; high
+0x8025	{Bold}	F6	WP.MRS name table; used 496 times in 7 files; high
+0x8026	{Exit}	F7	WP.MRS name table; used 145 times in 46 files; high
+0x8027	{Underline}	F8	WP.MRS name table; used 5 times in 4 files; high
+0x8028	{End Field}	F9	WP.MRS name table; not used in her files; high
+0x8029	{Save}	F10	WP.MRS name table; used 6 times in 6 files; high
+0x802A	{F11}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x802B	{F12}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x802C	{Setup}	Shift-F1	WP.MRS name table; used 1 times in 1 files; high
+0x802D	{Search Left}	Shift-F2	WP.MRS name table; used 15 times in 5 files; high
+0x802E	{Switch}	Shift-F3	WP.MRS name table; used 55 times in 18 files; high
+0x802F	{L/R Indent}	Shift-F4	WP.MRS name table; used 2 times in 1 files; high
+0x8030	{Date/Outline}	Shift-F5	WP.MRS name table; used 12 times in 5 files; high
+0x8031	{Center}	Shift-F6	WP.MRS name table; used 11 times in 6 files; high
+0x8032	{Print}	Shift-F7, Ctrl-PrtSc	WP.MRS name table; used 10 times in 8 files; high
+0x8033	{Format}	Shift-F8	WP.MRS name table; used 145 times in 31 files; high
+0x8034	{Merge Codes}	Shift-F9	WP.MRS name table; used 4 times in 3 files; high
+0x8035	{Retrieve}	Shift-F10	WP.MRS name table; used 4 times in 4 files; high
+0x8036	{Shft F11}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8037	{Shft F12}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8038	{Thesaurus}	Alt-F1	WP.MRS name table; used 1 times in 1 files; high
+0x8039	{Replace}	Alt-F2	WP.MRS name table; used 426 times in 31 files; high
+0x803A	{Reveal Codes}	Alt-F3, F11	WP.MRS name table; used 57 times in 23 files; high
+0x803B	{Block}	Alt-F4, F12	WP.MRS name table; used 89 times in 52 files; high
+0x803C	{Mark Text}	Alt-F5	WP.MRS name table; used 10 times in 7 files; high
+0x803D	{Flush Right}	Alt-F6	WP.MRS name table; used 10 times in 4 files; high
+0x803E	{Columns/Tables}	Alt-F7	WP.MRS name table; used 19 times in 6 files; high
+0x803F	{Style}	Alt-F8	WP.MRS name table; used 5 times in 3 files; high
+0x8040	{Graphics}	Alt-F9	WP.MRS name table; used 40 times in 11 files; high
+0x8041	{Macro}	Alt-F10	WP.MRS name table; used 12 times in 9 files; high
+0x8042	{Alt F11}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8043	{ALT F12}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8044	{Shell}	Ctrl-F1	WP.MRS name table; used 1 times in 1 files; high
+0x8045	{Spell}	Ctrl-F2	WP.MRS name table; not used in her files; high
+0x8046	{Screen}	Ctrl-F3	WP.MRS name table; used 25 times in 12 files; high
+0x8047	{Move}	Ctrl-F4	WP.MRS name table; used 36 times in 29 files; high
+0x8048	{Text In/Out}	Ctrl-F5	WP.MRS name table; used 9 times in 6 files; high
+0x8049	{Tab Align}	Ctrl-F6	WP.MRS name table; not used in her files; high
+0x804A	{Footnote}	Ctrl-F7	WP.MRS name table; used 32 times in 10 files; high
+0x804B	{Font}	Ctrl-F8	WP.MRS name table; used 153 times in 62 files; high
+0x804C	{Merge/Sort}	Ctrl-F9	WP.MRS name table; used 2 times in 1 files; high
+0x804D	{Macro Define}	Ctrl-F10	WP.MRS name table; not used in her files; high
+0x804E	{Ctrl F11}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x804F	{Ctrl F12}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8050	{Backspace}	Backspace [ASCII+scan overrides]	WP.MRS name table; used 138 times in 52 files; high
+0x8051	{Del}	Del, Grey Del [E0-prefixed (grey) keys]	WP.MRS name table; used 88 times in 32 files; high
+0x8052	{Del Word}	Ctrl-Backspace	WP.MRS name table; not used in her files; high
+0x8053	{Word Right}	Ctrl-Right, Grey Ctrl-Right [E0-prefixed (grey) keys]	WP.MRS name table; used 9 times in 4 files; high
+0x8054	{Word Left}	Ctrl-Left, Grey Ctrl-Left [E0-prefixed (grey) keys]	WP.MRS name table; used 8 times in 4 files; high
+0x8055	{End}	End, Grey End [E0-prefixed (grey) keys]	WP.MRS name table; used 85 times in 58 files; high
+0x8056	{Home-Home-Left}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8057	{Invalid}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8058	{Goto}	Ctrl-Home, Grey Ctrl-Home [E0-prefixed (grey) keys]	WP.MRS name table; used 25 times in 6 files; high
+0x8059	{Page Up}	PgUp, Grey PgUp [E0-prefixed (grey) keys]	WP.MRS name table; used 3 times in 2 files; high
+0x805A	{Page Down}	PgDn, Grey PgDn [E0-prefixed (grey) keys]	WP.MRS name table; used 3 times in 2 files; high
+0x805B	{Screen Down}	Keypad+ [keypad, NumLock off]	WP.MRS name table; not used in her files; high
+0x805C	{Screen Up}	Keypad- [keypad, NumLock off]	WP.MRS name table; not used in her files; high
+0x805D	{Typeover}	Ins, Grey Ins [E0-prefixed (grey) keys]	WP.MRS name table; used 7 times in 5 files; high
+0x805E	{Left Mar Rel}	Shift-Tab	WP.MRS name table; used 6 times in 3 files; high
+0x805F	{HPg}	Ctrl-Enter [ASCII+scan overrides], Ctrl-KeypadEnter [ASCII+scan overrides]	WP.MRS name table; used 7 times in 6 files; high
+0x8060	{SHy}	Ctrl-_	WP.MRS name table; used 28 times in 1 files; high
+0x8061	{-}	Alt--	WP.MRS name table; used 1 times in 1 files; high
+0x8062	{ }		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8063	{Para Up}	Ctrl-Up, Grey Ctrl-Up [E0-prefixed (grey) keys]	WP.MRS name table; not used in her files; high
+0x8064	{Para Down}	Ctrl-Down, Grey Ctrl-Down [E0-prefixed (grey) keys]	WP.MRS name table; not used in her files; high
+0x8065	{Item Left}	Alt-Left	WP.MRS name table; not used in her files; high
+0x8066	{Item Right}	Alt-Right	WP.MRS name table; not used in her files; high
+0x8067	{Item Up}	Alt-Up	WP.MRS name table; used 1 times in 1 files; high
+0x8068	{Item Down}	Alt-Down	WP.MRS name table; used 1 times in 1 files; high
+0x8069	{Alt Home}	Alt-Home	WP.MRS name table; not used in her files; high
+0x806A	{Del Word (Row)}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x806B	{Menu Bar}	Alt-=	WP.MRS name table; not used in her files; high
+0x806C	{Block Append}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x806D	{Block Move}	Ctrl-Del, Grey Ctrl-Del [E0-prefixed (grey) keys]	WP.MRS name table; not used in her files; high
+0x806E	{Block Copy}	Ctrl-Ins, Grey Ctrl-Ins [E0-prefixed (grey) keys]	WP.MRS name table; not used in her files; high
+0x806F	{INVALID}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8070	{MOUSE MOTION}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8071	{MOUSE L BUTTON}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8072	{MOUSE M BUTTON}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8073	{MOUSE R BUTTON}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0x8074	{INVALID}		WP.MRS name table; not used in her files; name high, behaviour unverified
+0xFC2C	{Macro Commands}	Ctrl-PgUp	command-range code but acts as a key (Ctrl-PgUp); WP.MRS; used in ALTJ/ALTR; high
+0xFD01-0xFDFF	{KEY MACRO n}		keyboard macro n stored in the active .WPK packet 2; used in 7 WPK tables; high
+0xFE41-0xFE5A	{ALT A}..{ALT Z}	Alt-A..Alt-Z	runs ALTx.WPM; default for Alt-letter keys; WP.MRS prefix "ALT "; display form {ALT x} medium-high
+0xFF00-0xFF09	{VAR 0}..{VAR 9}	Alt-0..Alt-9	inserts variable n; WP.MRS prefix "VAR "; 265 uses; high
+0x7FFF	(keyboard table only) special default at ext-scan 0x4A (Alt-keypad-minus)		meaning unknown; LOW
+0xFFFF	(keyboard table only) not a key / slot unused		high
+0x0000	(keyboard table only) key unassigned (does nothing)		medium-high

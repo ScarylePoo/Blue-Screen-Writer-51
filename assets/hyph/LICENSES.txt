@@ -1,0 +1,17 @@
+Hyphenation patterns (libhyphen / TeX format) used by Blue Screen Writer 51
+==========================================================================
+
+All files were taken unchanged from the LibreOffice dictionaries repository
+(https://github.com/LibreOffice/dictionaries), only renamed to hyph_xx_YY.dic.
+The hyphenation algorithm itself (Liang) is implemented in src/hyph.rs.
+
+File              Source (LibreOffice)           Licence (see the README next to it)
+----------------  -----------------------------  ------------------------------------------
+hyph_de_DE.dic    de/hyph_de_DE.dic              LGPL 2 or later (patterns: LPPL, dehyphn.tex)
+hyph_en_US.dic    en/hyph_en_US.dic              see README_hyph_en_US.txt (TeX patterns, permissive / LGPL/MPL)
+hyph_it_IT.dic    it_IT/hyph_it_IT.dic           LGPL
+hyph_fr_FR.dic    fr_FR/dictionaries/hyph_fr.dic LGPL 2.1 or later (patterns: MIT, hyph-fr.tex)
+hyph_es_ES.dic    es/hyph_es.dic                 GPL/LGPL/MPL triple licence (patterns: MIT)
+hyph_ru_RU.dic    ru_RU/hyph_ru_RU.dic           BSD-style, (c) Alexander I. Lebedev (README_hyph_ru_RU.txt)
+
+COPYING_LGPL_v2.1.txt is the GNU Lesser General Public License text.
