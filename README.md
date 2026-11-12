@@ -59,7 +59,7 @@ If you know 5.1, you already know this program:
 - Large, clear letters that grow with the window; Ctrl + = / Ctrl + Shift + minus / Ctrl + 0 to zoom.
 - Optional mouse: click, drag to mark a Block, double-click a word, right-click for the menu bar.
 
-A guide for 5.1 users that explains every new feature is included as `Guide - What Is New.docx` ([source](docs/GUIDE.md)).
+**The full manual is in the [wiki](../../wiki).** A shorter guide for 5.1 users that explains every new feature is included as `Guide - What Is New.docx` ([source](docs/GUIDE.md)).
 
 ## Building from source
 
