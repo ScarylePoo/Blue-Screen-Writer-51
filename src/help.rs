@@ -281,7 +281,7 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
                 "is kept in the document history (Ctrl-F5, 6 Revisions).",
             ],
         ),
-        EndField => ("End Field", &["Marks the end of a field in a merge file (merge is not yet", "available in this version)."]),
+        EndField => ("End Field", &["Marks the end of a field in a secondary merge file: inserts", "{END FIELD} and a hard return."]),
         Save => (
             "Save",
             &[
@@ -378,7 +378,7 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
                 "returns to the menu.",
             ],
         ),
-        MergeCodes => ("Merge Codes", &["Inserts merge codes (merge is not yet available in this version)."]),
+        MergeCodes => ("Merge Codes", &["Inserts merge codes into a primary file: Field, End Record,", "Input, Page Off, Next Record and the merge programming commands."]),
         Retrieve => (
             "Retrieve",
             &[
@@ -401,7 +401,9 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
         MarkText => (
             "Mark Text",
             &[
-                "Marks text for indexes and tables (mostly not yet available).",
+                "Marks text for an index, a table of contents, lists and",
+                "cross-references, defines and generates them, handles master",
+                "documents, Compare Documents and redline/strikeout.",
                 "",
                 "7 Track Changes: switch change tracking on or off, move to the",
                 "next change, accept or reject changes, or compare the document",
@@ -418,8 +420,8 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
                 "Edit, where columns can be widened, rows inserted and deleted.",
             ],
         ),
-        Style => ("Style", &["Styles are not yet available in this version."]),
-        Graphics => ("Graphics", &["Graphics boxes are not yet available in this version."]),
+        Style => ("Style", &["Creates, edits and applies styles (paired, open and outline", "styles), and saves or retrieves style libraries."]),
+        Graphics => ("Graphics", &["Figures, tables, text boxes, user boxes and equations, and", "horizontal or vertical lines.  Pictures: WPG, PNG, JPEG, BMP, GIF."]),
         Macro => (
             "Macro",
             &[
@@ -494,7 +496,7 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
                 "time - open or restore an earlier version.",
             ],
         ),
-        TabAlign => ("Tab Align", &["Aligns text on the decimal point at the next tab stop (not yet", "available in this version)."]),
+        TabAlign => ("Tab Align", &["Aligns text on the alignment character (normally the decimal", "point) at the next tab stop."]),
         Footnote => (
             "Footnote",
             &[
@@ -512,7 +514,7 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
                 "(all Windows fonts); 5 Print Color.",
             ],
         ),
-        MergeSort => ("Merge/Sort", &["Merge and sort are not yet available in this version."]),
+        MergeSort => ("Merge/Sort", &["1 Merge combines a primary file (form letter) with a secondary", "file (addresses); 2 Sort sorts lines, paragraphs or records,", "or selects records."]),
         Esc => (
             "Esc (Repeat)",
             &[

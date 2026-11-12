@@ -40,7 +40,7 @@ SAFETY
 SCREEN
  Large letters like the classic screen: 80 columns fill the window.
  Smaller letters: Ctrl+Shift+minus (or Ctrl + mouse wheel).  Larger again:
- Ctrl+=.  Ctrl+0 = normal.  Shift-F1 -> 2 Display -> 4 Screen Size.
+ Ctrl+=.  Ctrl+0 = normal.  Shift-F1 -> 2 Display -> 5 Screen Size.
 
 PRINT
  Shift-F7: 1 Full Document, 2 Page, 6 View Document, S Select Printer.

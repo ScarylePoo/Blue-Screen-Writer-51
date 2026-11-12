@@ -35,7 +35,7 @@ You can make the window as large as you like, or maximise it. The letters are la
 - **Ctrl + 0**: back to normal.
 - **Ctrl + mouse wheel**: does the same as these keys.
 
-To choose a fixed screen size, go to Shift-F1, 2 Display, 4 Screen Size. The choices are large letters, whole page, or the classic 80 x 25.
+To choose a fixed screen size, go to Shift-F1, 2 Display, 5 Screen Size. The choices are large letters, whole page, or the classic 80 x 25.
 
 ## 2. Files and folders
 

@@ -92,13 +92,13 @@ fn display() -> Box<dyn Screen> {
             "~Colors/Fonts/Attributes",
             |wp| {
                 vec![match wp.settings.colors.as_str() {
-                    "wp" => "Classic blue (default)".into(),
+                    "wp" => "Classic blue".into(),
                     "mono" => "Black & White".into(),
-                    _ => "Your own colours".into(),
+                    _ => "Your own colours (default)".into(),
                 }]
             },
             Edit::Choice(
-                vec!["Your own colours", "Classic blue (default)", "Black & White"],
+                vec!["Your own colours (default)", "Classic blue", "Black & White"],
                 Rc::new(|wp, k| set(wp, |s| s.colors = ["her", "wp", "mono"][k].into())),
             ),
         ),
@@ -109,7 +109,14 @@ fn display() -> Box<dyn Screen> {
             Edit::Choice(vec!["Real bold/italic/underline", "Colours only"], Rc::new(|wp, k| set(wp, |s| s.typographic = k == 0))),
         ),
         item(
-            '4',
+            '3',
+            "~Text Screen Type",
+            |wp| vec![format!("80x{} 16 Color", wp.settings.rows)],
+            Edit::Choice(vec!["80x25", "80x43", "80x50"], Rc::new(|wp, k| set(wp, |s| s.rows = [25, 43, 50][k]))),
+        ),
+        item('4', "~Menu Options", |_| vec![], Edit::Sub(Rc::new(|_| menu_options()))),
+        item(
+            '5',
             "Screen ~Size",
             |wp| {
                 vec![if wp.settings.screen_mode == "classic" {
@@ -147,13 +154,6 @@ fn display() -> Box<dyn Screen> {
                 }),
             ),
         ),
-        item(
-            '3',
-            "~Text Screen Type",
-            |wp| vec![format!("80x{} 16 Color", wp.settings.rows)],
-            Edit::Choice(vec!["80x25", "80x43", "80x50"], Rc::new(|wp, k| set(wp, |s| s.rows = [25, 43, 50][k]))),
-        ),
-        item('4', "~Menu Options", |_| vec![], Edit::Sub(Rc::new(|_| menu_options()))),
         item(
             '6',
             "~Reveal Codes Window Size",
