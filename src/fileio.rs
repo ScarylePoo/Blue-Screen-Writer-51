@@ -172,7 +172,19 @@ pub fn load(p: &Path) -> std::io::Result<Document> {
 }
 
 /// Load from memory; `p` only supplies the file name extension.
+///
+/// Like Notepad, this opens *anything*: when a file is not in a known
+/// format, or its reader fails on it, it is shown as text (for binary files:
+/// the readable text found in them).
 pub fn load_bytes(p: &Path, bytes: &[u8], depth: u32) -> std::io::Result<Document> {
+    match load_known(p, bytes, depth) {
+        Ok(d) => Ok(d),
+        Err(_) if depth == 0 => Ok(rescue_text(bytes)),
+        Err(e) => Err(e),
+    }
+}
+
+fn load_known(p: &Path, bytes: &[u8], depth: u32) -> std::io::Result<Document> {
     // OpenDocument (.odt/.ott zip by mimetype, .fodt flat XML)
     if bytes.starts_with(b"PK\x03\x04") && (crate::odt::is_odt(bytes) || crate::odt::is_ott(bytes)) {
         return crate::odt::read_odt(bytes);
@@ -188,7 +200,9 @@ pub fn load_bytes(p: &Path, bytes: &[u8], depth: u32) -> std::io::Result<Documen
         Kind::WpMac => crate::fmt_wpmac::read(bytes).map_err(err),
         Kind::Wp42 => crate::fmt_wp42::read(bytes).map_err(err),
         Kind::OleDoc => {
-            if crate::fmt_works::probe(bytes) {
+            if crate::fmt_msg::probe(bytes) {
+                crate::fmt_msg::read(bytes).map_err(err)
+            } else if crate::fmt_works::probe(bytes) {
                 crate::fmt_works::read(bytes).map_err(err)
             } else {
                 crate::msdoc::read(bytes).map_err(err)
@@ -220,12 +234,83 @@ pub fn load_bytes(p: &Path, bytes: &[u8], depth: u32) -> std::io::Result<Documen
         Kind::Html => crate::fmt_html::read(bytes).map_err(err),
         Kind::Markdown => crate::fmt_md::read(bytes).map_err(err),
         Kind::Pdf => crate::fmt_pdf::read(bytes).map_err(err),
-        Kind::Text => {
-            let s = decode_text(bytes);
-            let s = s.replace("\r\n", "\n");
-            Ok(Document::from_text(&s))
+        Kind::Text => Ok(rescue_text(bytes)),
+    }
+}
+
+/// Is this mostly binary data (not text in any encoding)?
+fn looks_binary(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(64 << 10)];
+    if head.is_empty() {
+        return false;
+    }
+    // UTF-16 text has many zero bytes but is text
+    if matches!(crate::fmt_text::detect(head).0, crate::fmt_text::Enc::Utf16Le | crate::fmt_text::Enc::Utf16Be) {
+        return false;
+    }
+    let ctrl = head.iter().filter(|&&b| b < 0x20 && !matches!(b, b'\t' | b'\n' | b'\r' | 0x0C | 0x1A)).count();
+    ctrl * 10 > head.len()
+}
+
+/// A file shown as text, Notepad-style.  Binary files: the runs of readable
+/// text in them (8-bit/UTF-8 and UTF-16), one per line.
+pub fn rescue_text(bytes: &[u8]) -> Document {
+    if !looks_binary(bytes) {
+        let s = decode_text(bytes).replace("\r\n", "\n").replace('\r', "\n");
+        let s: String = s.chars().filter(|&c| c == '\n' || c == '\t' || c == '\u{c}' || !c.is_control()).collect();
+        return Document::from_text(&s);
+    }
+    const MIN: usize = 4;
+    const LIMIT: usize = 4 << 20;
+    let mut out = String::new();
+    let push = |run: &str, out: &mut String| {
+        if run.trim().chars().count() >= MIN && out.len() < LIMIT {
+            out.push_str(run.trim());
+            out.push('\n');
+        }
+    };
+    // 8-bit / UTF-8 runs
+    let mut run = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        let len = match b {
+            0x20..=0x7E | b'\t' => 1,
+            0xC2..=0xDF => 2,
+            0xE0..=0xEF => 3,
+            0xF0..=0xF4 => 4,
+            _ => 0,
+        };
+        if len > 0 {
+            if let Some(Ok(s)) = bytes.get(i..i + len).map(std::str::from_utf8) {
+                run.push_str(s);
+                i += len;
+                continue;
+            }
+        }
+        push(&run, &mut out);
+        run.clear();
+        i += 1;
+    }
+    push(&run, &mut out);
+    // UTF-16LE runs (Windows programs store most text this way)
+    let mut run16 = String::new();
+    for p in bytes.chunks_exact(2) {
+        let u = u16::from_le_bytes([p[0], p[1]]);
+        match char::from_u32(u as u32) {
+            Some(c) if u >= 0x20 && !(0xD800..0xE000).contains(&u) && (c.is_alphanumeric() || c.is_ascii_punctuation() || c == ' ') && u != 0xFFFD => run16.push(c),
+            _ => {
+                if run16.chars().count() >= 6 {
+                    push(&run16, &mut out);
+                }
+                run16.clear();
+            }
         }
     }
+    if run16.chars().count() >= 6 {
+        push(&run16, &mut out);
+    }
+    Document::from_text(&out)
 }
 
 /// Write atomically: to a temporary file next to the target, then rename.

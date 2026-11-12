@@ -161,6 +161,43 @@ impl<'a> Cfb<'a> {
         out
     }
 
+    /// Directory ids of all entries directly inside the storage whose
+    /// first child is `child` (the red-black tree of siblings).
+    fn siblings(&self, child: u32) -> Vec<usize> {
+        let mut out = vec![];
+        let mut stack = vec![child];
+        let mut seen = vec![false; self.dir.len()];
+        while let Some(id) = stack.pop() {
+            let Some(e) = self.dir.get(id as usize) else { continue };
+            if std::mem::replace(&mut seen[id as usize], true) {
+                continue;
+            }
+            out.push(id as usize);
+            stack.push(e.left);
+            stack.push(e.right);
+        }
+        out
+    }
+
+    fn read_entry(&self, e: &DirEntry) -> Vec<u8> {
+        let size = e.size.min(self.data.len() as u64 * 2) as usize;
+        if e.size < self.cutoff { self.mini_chain(e.start, size) } else { self.chain(e.start, size) }
+    }
+
+    /// Names of the storages (sub-folders) directly below the root.
+    pub fn storages(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.siblings(self.dir[0].child).into_iter().filter(|&i| self.dir[i].typ == 1).map(|i| self.dir[i].name.clone()).collect();
+        v.sort();
+        v
+    }
+
+    /// A stream inside the storage `storage` (directly below the root).
+    pub fn stream_in(&self, storage: &str, name: &str) -> Option<Vec<u8>> {
+        let st = self.siblings(self.dir[0].child).into_iter().find(|&i| self.dir[i].typ == 1 && self.dir[i].name.eq_ignore_ascii_case(storage))?;
+        let id = self.siblings(self.dir[st].child).into_iter().find(|&i| self.dir[i].typ == 2 && self.dir[i].name.eq_ignore_ascii_case(name))?;
+        Some(self.read_entry(&self.dir[id]))
+    }
+
     /// A stream directly below the root storage.
     pub fn stream(&self, name: &str) -> Option<Vec<u8>> {
         let mut stack = vec![self.dir[0].child];

@@ -722,7 +722,10 @@ pub mod winprint {
                     }
                     let x = (run.x as f64 * dpix / 1200.0 - offx).round() as i32;
                     let y = (run.y as f64 * dpiy / 1200.0 - offy).round() as i32;
-                    ExtTextOutW(hdc, x, y, 0, std::ptr::null(), text.as_ptr(), text.len() as u32, dx.as_ptr());
+                    // Arabic arrives already shaped and in visual order: stop
+                    // Windows from reordering/reshaping it (ETO_IGNORELANGUAGE)
+                    let opts = if run.text.iter().any(|&c| crate::bidi::is_rtl_char(c)) { 0x1000 } else { 0 };
+                    ExtTextOutW(hdc, x, y, opts, std::ptr::null(), text.as_ptr(), text.len() as u32, dx.as_ptr());
                     SelectObject(hdc, old);
                     DeleteObject(font);
                 }

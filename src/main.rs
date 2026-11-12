@@ -5,6 +5,7 @@
 mod agile;
 mod aids;
 mod app;
+mod bidi;
 mod comments;
 mod columns;
 mod clipboard;
@@ -31,6 +32,7 @@ mod fmt_amipro;
 mod fmt_build;
 mod fmt_html;
 mod fmt_md;
+mod fmt_msg;
 mod fmt_pdf;
 mod fmt_text;
 mod fmt_word2;

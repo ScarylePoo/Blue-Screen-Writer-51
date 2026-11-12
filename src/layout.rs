@@ -445,6 +445,9 @@ fn layout_pass(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::Ha
 fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::HashMap<usize, usize>) -> Layout {
     use crate::columns::{ColBlock, ColRun, LineCol};
     let init = &doc.init;
+    // right-to-left text anywhere? (otherwise the bidi pass costs nothing)
+    let doc_rtl = doc.els.iter().any(|e| matches!(e, El::Ch(c) if crate::bidi::is_rtl_char(*c)));
+    let mut rtl_para_cache: Option<(usize, bool)> = None;
     let mut st = State {
         left: init.left,
         right: init.right,
@@ -1011,6 +1014,23 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
             }
             page += 1;
             y = st.top;
+        }
+        if doc_rtl {
+            // paragraph direction, cached per paragraph start
+            let mut ps = line_start.min(els.len());
+            while ps > 0 && !matches!(els[ps - 1], El::Code(Code::HRt | Code::HPg | Code::Cell | Code::Row | Code::TblDef { .. } | Code::TblOff)) {
+                ps -= 1;
+            }
+            let rtl = match rtl_para_cache {
+                Some((p, r)) if p == ps => r,
+                _ => {
+                    let r = crate::bidi::para_is_rtl(els, ps);
+                    rtl_para_cache = Some((ps, r));
+                    r
+                }
+            };
+            let b = crate::bidi::Bounds { lm_col, rm_col, lm, rm: rm_limit };
+            crate::bidi::reorder_line(&mut cells, &mut caret, line_start, rtl, &b);
         }
         let line = Line {
             start: line_start,

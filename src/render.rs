@@ -20,6 +20,9 @@ struct Glyph {
 
 pub struct Renderer {
     fonts: [Font; 4],
+    /// Windows fonts for characters the screen font lacks (Hebrew, …),
+    /// loaded on first need.
+    fallback: Option<Vec<Font>>,
     cache: HashMap<(char, u8, u32), Glyph>,
     pub cell_w: usize,
     pub cell_h: usize,
@@ -37,6 +40,7 @@ impl Renderer {
         let load = |b: &[u8]| Font::from_bytes(b, FontSettings::default()).expect("font");
         Renderer {
             fonts: [load(FONT_REGULAR), load(FONT_BOLD), load(FONT_ITALIC), load(FONT_BOLD_ITALIC)],
+            fallback: None,
             cache: HashMap::new(),
             cell_w: 9,
             cell_h: 18,
@@ -82,8 +86,18 @@ impl Renderer {
     fn glyph(&mut self, ch: char, face: u8) -> &Glyph {
         let key = (ch, face, self.px.to_bits());
         if !self.cache.contains_key(&key) {
-            let font = &self.fonts[face as usize];
-            let font = if font.lookup_glyph_index(ch) == 0 && face != 0 { &self.fonts[0] } else { font };
+            let mut font = &self.fonts[face as usize];
+            if font.lookup_glyph_index(ch) == 0 && face != 0 {
+                font = &self.fonts[0];
+            }
+            if font.lookup_glyph_index(ch) == 0 && !ch.is_ascii() {
+                if self.fallback.is_none() {
+                    self.fallback = Some(load_fallback_fonts());
+                }
+                if let Some(f) = self.fallback.as_ref().unwrap().iter().find(|f| f.lookup_glyph_index(ch) != 0) {
+                    font = f;
+                }
+            }
             let (m, bitmap) = font.rasterize(ch, self.px);
             self.cache.insert(key, Glyph { w: m.width, h: m.height, xmin: m.xmin, ymin: m.ymin, bitmap });
         }
@@ -287,6 +301,23 @@ impl Renderer {
             }
         }
     }
+}
+
+/// Courier New (closest to the screen font), then Arial: together they cover
+/// Hebrew, Arabic, Greek, Cyrillic and most symbols.
+fn load_fallback_fonts() -> Vec<Font> {
+    let mut v = vec![];
+    for name in ["cour.ttf", "arial.ttf", "seguisym.ttf"] {
+        for d in crate::fonts::font_dirs() {
+            if let Ok(b) = std::fs::read(d.join(name)) {
+                if let Ok(f) = Font::from_bytes(b, FontSettings::default()) {
+                    v.push(f);
+                    break;
+                }
+            }
+        }
+    }
+    v
 }
 
 fn blend(dst: u32, src: u32, a: u32) -> u32 {

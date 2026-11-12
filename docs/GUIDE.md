@@ -58,7 +58,10 @@ Shift-F10 and F5 open almost any word-processor file:
 - **Word**: .docx, .doc, also old Word for DOS and Word 2 files;
 - **your old WordPerfect files**: 4.2, 5.0, 5.1 and later versions (.wp, .wp5, .wpd and files without an extension);
 - **OpenOffice / LibreOffice** (.odt), **RTF**, **HTML**, plain text in any encoding;
-- WordStar, Works, Write, Ami Pro, AbiWord, Markdown, and the text of PDF files.
+- WordStar, Works, Write, Ami Pro, AbiWord, Markdown, and the text of PDF files;
+- **Outlook e-mails (.msg)**: shown with From, To, Date, Subject and the names of attachments, followed by the message.
+
+And like Notepad, it opens **any other file** too: whatever it does not recognise is shown as plain text (for program files or pictures: the readable text inside them). Saving such a file always makes a new .docx next to it; the original is never changed.
 
 ### Saving: documents are now Word files
 
@@ -139,11 +142,22 @@ Word shows these changes as normal Word tracked changes, and the changes clients
 
 Misspelled words get a **red wavy underline** on the screen while you type. This is never printed.
 
-The program **recognises the language of each paragraph by itself**: German, English, French, Italian, Spanish and Russian. A Russian sentence in a German letter, or an English paragraph in a French document, is checked in its own language. All-capital abbreviations (ICAO, EU, OACI) are not marked.
+The program **recognises the language of each paragraph by itself**: German, English, French, Italian, Spanish, Russian and Arabic. A Russian sentence in a German letter, or an English paragraph in a French document, is checked in its own language. All-capital abbreviations (ICAO, EU, OACI) are not marked.
 
 **Ctrl-F2** (Spell) works as before. It also switches language paragraph by paragraph. If you choose a language yourself in its menu, it uses that language for the whole document.
 
-Thesaurus (**Alt-F1**) and hyphenation also exist for these languages.
+Thesaurus (**Alt-F1**) also exists for these languages, and hyphenation for all except Arabic.
+
+### Arabic (right to left)
+
+Arabic text is shown the way it is read: from right to left, with the letters joined. A paragraph that starts in Arabic is set against the right margin; an Arabic name inside an English or German sentence simply reads right to left within the line. Numbers and Latin words inside Arabic text stay left to right. Type Arabic with the Windows Arabic keyboard (add it in Windows Settings, Time & Language, Language; switch with Windows key + Space).
+
+Good to know:
+
+- the cursor keys move through the text in the order it was typed: in Arabic, Right arrow moves to the next letter, which is on its left on the screen;
+- **Reveal Codes** shows the text in typed order with the letters unjoined, just as it shows all other codes;
+- Word, LibreOffice and printing show Arabic paragraphs right to left as well;
+- Hebrew is shown right to left too; for Hebrew spelling, a Hebrew dictionary can be added to the *dict* folder.
 
 ### Typing aids
 

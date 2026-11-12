@@ -546,7 +546,17 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
             let h = if hanging > 0 { format!(" w:hanging=\"{}\"", twips(hanging)) } else { String::new() };
             ppr.push_str(&format!("<w:ind w:left=\"{}\" w:right=\"{}\"{h}/>", twips(ind_left), twips(ind_right)));
         }
-        ppr.push_str(&format!("<w:jc w:val=\"{jc}\"/>"));
+        // right-to-left paragraph (first strong letter Arabic/Hebrew): Word
+        // needs <w:bidi/> (before spacing/ind/jc); its default alignment is
+        // then the right margin, so plain "left" is left out
+        let rtl_par = crate::bidi::para_is_rtl(els, i);
+        if rtl_par {
+            let at = ["<w:spacing", "<w:ind", "<w:jc"].iter().filter_map(|t| ppr.find(t)).min().unwrap_or(ppr.len());
+            ppr.insert_str(at, "<w:bidi/>");
+        }
+        if !(rtl_par && jc == "left") {
+            ppr.push_str(&format!("<w:jc w:val=\"{jc}\"/>"));
+        }
         body.push_str("<w:p><w:pPr>");
         body.push_str(&ppr);
         body.push_str("</w:pPr>");
@@ -562,9 +572,16 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
         let mut text = String::new();
         let mut cur = RunProps { attrs, font: st_font.clone(), rev: rev.clone(), link: link.is_some(), rstyle: cstyle.clone() };
         let mut indent_skipping = true;
-        let flush = |body: &mut String, text: &mut String, cur: &RunProps| {
+        // runs of Arabic/Hebrew carry <w:rtl/>; neutral characters (spaces,
+        // punctuation) stay with the run they are in
+        let mut cur_rtl = false;
+        let flush = |body: &mut String, text: &mut String, cur: &RunProps, rtl: bool| {
             if !text.is_empty() {
-                let run = format!("<w:r>{}{}</w:r>", rpr_xml(cur, &base_font), text);
+                let mut rpr = rpr_xml(cur, &base_font);
+                if rtl {
+                    rpr = if rpr.is_empty() { "<w:rPr><w:rtl/></w:rPr>".to_string() } else { rpr.replace("</w:rPr>", "<w:rtl/></w:rPr>") };
+                }
+                let run = format!("<w:r>{}{}</w:r>", rpr, text);
                 match &cur.rev {
                     Some((del, author, date)) => {
                         let id = REV_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -583,9 +600,28 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                 El::Ch(c) => {
                     indent_skipping = false;
                     let rp = RunProps { attrs, font: st_font.clone(), rev: rev.clone(), link: link.is_some(), rstyle: cstyle.clone() };
-                    if rp != cur {
-                        flush(&mut body, &mut text, &cur);
+                    let rtl = if crate::bidi::is_rtl_char(*c) && c.is_alphabetic() {
+                        true
+                    } else if c.is_alphanumeric() {
+                        false
+                    } else {
+                        // neutral: the direction on both sides if they agree,
+                        // else the paragraph direction (UAX #9 N1/N2)
+                        let next = els[k + 1..j].iter().find_map(|e| match e {
+                            El::Ch(n) if n.is_alphabetic() => Some(crate::bidi::is_rtl_char(*n)),
+                            El::Ch(n) if n.is_numeric() => Some(false),
+                            _ => None,
+                        });
+                        match next {
+                            Some(nr) if nr == cur_rtl => cur_rtl,
+                            Some(_) => rtl_par,
+                            None => cur_rtl,
+                        }
+                    };
+                    if rp != cur || rtl != cur_rtl {
+                        flush(&mut body, &mut text, &cur, cur_rtl);
                         cur = rp;
+                        cur_rtl = rtl;
                     }
                     let s = xml_esc(&c.to_string());
                     // consecutive letters share one <w:t> element
@@ -620,7 +656,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                         }
                         Code::Tab => {
                             if rp_now != cur {
-                                flush(&mut body, &mut text, &cur);
+                                flush(&mut body, &mut text, &cur, cur_rtl);
                                 cur = rp_now;
                             }
                             text.push_str("<w:tab/>");
@@ -634,7 +670,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                         Code::FlushRight | Code::FlushRightDot if align_at != Some(k) => {
                             // flush right inside a line (e.g. generated ToC page numbers)
                             if rp_now != cur {
-                                flush(&mut body, &mut text, &cur);
+                                flush(&mut body, &mut text, &cur, cur_rtl);
                                 cur = rp_now;
                             }
                             let leader = if matches!(c, Code::FlushRightDot) { "dot" } else { "none" };
@@ -643,7 +679,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                         }
                         Code::Center | Code::FlushRight | Code::FlushRightDot => {}
                         Code::Comment(t) => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             let id = parts.comments.len();
                             let paras: String = t
                                 .split('\n')
@@ -655,7 +691,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                             ));
                         }
                         Code::Mark(Mark::Target { name }) => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             let id = parts.bookmarks;
                             parts.bookmarks += 1;
                             body.push_str(&format!("<w:bookmarkStart w:id=\"{id}\" w:name=\"{}\"/><w:bookmarkEnd w:id=\"{id}\"/>", xml_esc(&bookmark_name(name))));
@@ -664,7 +700,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                             // cross-references go out as plain text (the generated value)
                             indent_skipping = false;
                             if rp_now != cur {
-                                flush(&mut body, &mut text, &cur);
+                                flush(&mut body, &mut text, &cur, cur_rtl);
                                 cur = rp_now;
                             }
                             text.push_str(&format!("<w:t xml:space=\"preserve\">{}</w:t>", xml_esc(v)));
@@ -676,14 +712,14 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                         // are not printed; computed values are ordinary text.
                         Code::Merge(name) => {
                             if rp_now != cur {
-                                flush(&mut body, &mut text, &cur);
+                                flush(&mut body, &mut text, &cur, cur_rtl);
                                 cur = rp_now;
                             }
                             indent_skipping = false;
                             text.push_str(&format!("<w:t xml:space=\"preserve\">{}</w:t>", xml_esc(&format!("{{{name}}}"))));
                         }
                         Code::Link(u) => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             if link_open {
                                 body.push_str("</w:hyperlink>");
                                 link_open = false;
@@ -695,7 +731,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                             link = Some(u.clone());
                         }
                         Code::LinkEnd => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             if link_open {
                                 body.push_str("</w:hyperlink>");
                                 link_open = false;
@@ -703,12 +739,12 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                             link = None;
                         }
                         Code::Bookmark(name) => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             let id = BM_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             body.push_str(&format!("<w:bookmarkStart w:id=\"{id}\" w:name=\"{}\"/><w:bookmarkEnd w:id=\"{id}\"/>", xml_esc(name)));
                         }
                         Code::Note { kind, els: nels } => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             parts.nested += 1;
                             let mut inner = body_xml(doc, nels, parts);
                             parts.nested -= 1;
@@ -735,7 +771,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                             }
                         }
                         Code::GBox(b) => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             let o = crate::gfx::opts_before(els, k, b.kind);
                             let inner = if b.contents == crate::gfx::Contents::Text { body_xml(doc, &b.text, parts) } else { String::new() };
                             let num = crate::gfx::number_before(els, k);
@@ -743,7 +779,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
                             body.push_str(&crate::gfxdocx::box_xml(doc, b, &o, &inner, &cap, &mut parts.media));
                         }
                         Code::GLine(l) => {
-                            flush(&mut body, &mut text, &cur);
+                            flush(&mut body, &mut text, &cur, cur_rtl);
                             body.push_str(&crate::gfxdocx::line_xml(doc, l));
                         }
                         Code::RevOn { del, author, date } => rev = Some((*del, author.clone(), date.clone())),
@@ -756,7 +792,7 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
             }
             k += 1;
         }
-        flush(&mut body, &mut text, &cur);
+        flush(&mut body, &mut text, &cur, cur_rtl);
         if link_open {
             body.push_str("</w:hyperlink>");
         }
@@ -2211,7 +2247,6 @@ mod tests {
 #[cfg(test)]
 mod word_edit_tests {
     use super::*;
-    use crate::doc::*;
 
     /// Save, then read back the way a file edited in Word is read (the
     /// private stream part no longer matches): text, attributes and tabs.

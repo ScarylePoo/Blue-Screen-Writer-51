@@ -202,7 +202,9 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
         let rm = line.right;
         let _ = right;
         let mut extra_per_space = 0f64;
-        if just == Justify::Full && line.term == LineEnd::Soft {
+        // lines in visual (right-to-left) order: glyphs are placed one by one
+        let rtl_line = crate::bidi::line_has_rtl(&line.cells);
+        if just == Justify::Full && line.term == LineEnd::Soft && !rtl_line {
             let last_nonspace = line.cells.iter().rposition(|c| c.ch != ' ');
             if let Some(ln) = last_nonspace {
                 let last = &line.cells[ln];
@@ -362,7 +364,13 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
             } else {
                 0
             };
-            let same = run.as_ref().is_some_and(|r| r.attrs == cur_attrs && r.font == cur_font.name && r.size_cpt == size && r.y == baseline + dy);
+            let same = run.as_ref().is_some_and(|r| {
+                r.attrs == cur_attrs
+                    && r.font == cur_font.name
+                    && r.size_cpt == size
+                    && r.y == baseline + dy
+                    && (!rtl_line || (r.x + r.adv.iter().sum::<i32>() - x).abs() <= 2)
+            });
             if !same {
                 if let Some(r) = run.take() {
                     page.runs.push(r);

@@ -473,7 +473,7 @@ static READY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 static LOADING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
 /// Is the dictionary loaded?  If not, start loading it in the background.
-fn dict_ready(lang: &str) -> bool {
+pub fn dict_ready(lang: &str) -> bool {
     if READY.lock().unwrap().iter().any(|l| l == lang) {
         return true;
     }
@@ -579,6 +579,13 @@ pub fn detect_paragraph_lang(els: &[El], at: usize, default: &str) -> String {
 /// `para`: Cyrillic words are Russian; Latin words in a Russian paragraph
 /// use the default language.
 pub fn lang_for_word(para: &str, default: &str, word: &str) -> String {
+    // right-to-left scripts have their own (optional) dictionaries
+    if word.chars().any(|c| ('\u{590}'..='\u{5ff}').contains(&c)) {
+        return "HE".into();
+    }
+    if crate::bidi::has_rtl(word) {
+        return "AR".into();
+    }
     let cyr = word.chars().any(|c| ('\u{400}'..='\u{4ff}').contains(&c));
     if cyr && para != "RU" {
         "RU".into()

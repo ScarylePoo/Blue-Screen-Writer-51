@@ -32,7 +32,7 @@ If you know 5.1, you already know this program:
 
 **Files**
 - Documents are saved as **Word documents (.docx)** that open in Word, LibreOffice and on phones. Everything the editor knows (every code you see in Reveal Codes) is kept exactly, even after the file was edited in Word.
-- Opens about 25 formats: Word (.docx, .doc, Word for DOS, Word 2), WordPerfect 4.2–6+ (.wp, .wp5, .wpd, …), OpenDocument, RTF, HTML, Markdown, WordStar, Works, Write, Ami Pro, AbiWord, plain text in any encoding, and the text of PDFs.
+- Opens about 25 formats: Word (.docx, .doc, Word for DOS, Word 2), WordPerfect 4.2–6+ (.wp, .wp5, .wpd, …), OpenDocument, RTF, HTML, Markdown, WordStar, Works, Write, Ami Pro, AbiWord, Outlook e-mails (.msg), plain text in any encoding, and the text of PDFs — and, like Notepad, anything else as text.
 - Save As Word, **PDF**, ODT, RTF, HTML or text; password-protected documents compatible with Word.
 - Long file names with spaces and accents, mapped drives and `\\server\share` paths. Shift-F10 + Up arrow recalls recent documents.
 - Can be registered as the Windows program for .docx/.doc/.wpd (Setup → 7).
@@ -50,8 +50,8 @@ If you know 5.1, you already know this program:
 - Copy and paste with the Windows clipboard (Ctrl-Ins, Shift-Del, Shift-Ins).
 
 **Writing**
-- **Spell check as you type** with a red underline, with automatic **per-paragraph language detection** (English, German, French, Italian, Spanish, Russian); smart quotes per language; autocorrect.
-- Latin and **Cyrillic** text, typed with any Windows keyboard layout or the classic Compose key.
+- **Spell check as you type** with a red underline, with automatic **per-paragraph language detection** (English, German, French, Italian, Spanish, Russian, Arabic); smart quotes per language; autocorrect.
+- Latin, **Cyrillic** and **Arabic** text (right to left, joined letters, mixed with left-to-right text, on the classic text screen as well as in print and Word files), typed with any Windows keyboard layout or the classic Compose key.
 - **Windows printing** with TrueType/OpenType fonts, pictures in PNG/JPEG/BMP/GIF as well as WPG.
 - Spreadsheet import and links (Ctrl-F5 → 5) from **Excel .xlsx** and CSV, as tables or tabbed text.
 - Document information for translators: words, characters, standard lines and pages, invoice amount.

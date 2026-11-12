@@ -20,7 +20,8 @@ wheel = scroll, right button or Alt-= = pull-down menu bar.
 
 FILES
  Saved as Word files (.docx) - opens in Word, LibreOffice, etc.
- Opens: .docx .doc .rtf .odt WP 4.2-6 (.wp .wp5 .wpd ...), and more.
+ Opens: .docx .doc .rtf .odt WP 4.2-6 (.wp .wp5 .wpd ...), Outlook .msg,
+ and like Notepad any other file as text.
  F5 List Files: long names, spaces, network drives, \\server\share paths.
  Ctrl-F5 3 Save As: Word, PDF, ODT, RTF, HTML, text (several encodings).
  Double-click documents in Windows: Shift-F1 -> 7 -> Register, then choose

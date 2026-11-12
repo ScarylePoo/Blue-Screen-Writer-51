@@ -43,6 +43,9 @@ pub const LANGS: &[Lang] = &[
     Lang { code: "FR", name: "Français", dict: "fr_FR", thes: "th_fr_FR_v2.dat" },
     Lang { code: "ES", name: "Español", dict: "es_ES", thes: "th_es_ES_v2.dat" },
     Lang { code: "RU", name: "Русский", dict: "ru_RU", thes: "th_ru_RU_v2.dat" },
+    Lang { code: "AR", name: "Arabic", dict: "ar", thes: "th_ar.dat" },
+    // no Hebrew dictionary is shipped; put he_IL.aff/.dic into dict\he_IL to enable it
+    Lang { code: "HE", name: "Hebrew", dict: "he_IL", thes: "th_he_IL.dat" },
 ];
 
 pub fn lang_info(code: &str) -> &'static Lang {
@@ -771,6 +774,10 @@ impl Spell {
             run.count += 1;
             let prev = run.prev.replace(w.clone());
             if !has_letter(&w.text) || (self.chk.ignore_numbers && has_digit(&w.text)) {
+                continue;
+            }
+            // Arabic/Hebrew: no dictionary installed for them yet
+            if crate::bidi::has_rtl(&w.text) && !dict_exists_for_rtl(&w.text) {
                 continue;
             }
             // each paragraph in its own language
@@ -1772,4 +1779,11 @@ mod tests {
         let it = thesaurus_for("IT").expect("Italian thesaurus");
         assert!(it.lookup("casa").is_some());
     }
+}
+
+/// Is there a dictionary for the right-to-left script of `word`?
+/// (Arabic "AR" / Hebrew "HE" — not shipped yet; a user can add one.)
+pub fn dict_exists_for_rtl(word: &str) -> bool {
+    let code = if word.chars().any(|c| ('\u{590}'..='\u{5ff}').contains(&c)) { "HE" } else { "AR" };
+    LANGS.iter().any(|l| l.code == code) && crate::aids::dict_ready(code)
 }
