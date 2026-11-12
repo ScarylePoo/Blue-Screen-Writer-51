@@ -126,6 +126,19 @@ pub fn default_paper() -> (i32, i32) {
                 return (9921, 14031); // A4
             }
         }
+        // macOS / Linux: the locale (LC_PAPER, LC_ALL, LANG); tests: Letter
+        #[cfg(not(windows))]
+        {
+            if cfg!(test) {
+                return (10200, 13200);
+            }
+            let loc = ["LC_PAPER", "LC_ALL", "LANG"].iter().find_map(|v| std::env::var(v).ok().filter(|s| !s.is_empty())).unwrap_or_default();
+            let region = loc.split(['.', '@']).next().unwrap_or("").rsplit('_').next().unwrap_or("").to_ascii_uppercase();
+            if matches!(region.as_str(), "US" | "CA" | "MX" | "PH" | "CL" | "CO" | "VE" | "CR" | "GT" | "PR" | "SV" | "PA") {
+                return (10200, 13200); // Letter
+            }
+        }
+        #[allow(unreachable_code)]
         (9921, 14031)
     })
 }

@@ -706,6 +706,7 @@ mod tests {
         assert!(wild_match("br?ef*", "Brief 2.txt"));
     }
     #[test]
+    #[cfg(windows)] // \\server\share paths exist only on Windows
     fn norm_unc() {
         let p = normalize(Path::new(r"\\server\share\a\..\b"));
         assert_eq!(p.to_string_lossy().replace('/', "\\"), r"\\server\share\b");

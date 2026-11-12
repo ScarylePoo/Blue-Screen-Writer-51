@@ -94,6 +94,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[cfg(windows)] // C:\ paths, case-insensitive like Windows
     fn keeps_nine_most_recent_first() {
         let mut wp = Wp::new(80, 25);
         for k in 0..12 {
@@ -108,6 +109,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)] // C:\ paths
     fn up_cycles_in_prompt() {
         let mut wp = Wp::new(80, 25);
         remember(&mut wp, Path::new("C:\\a.docx"));
