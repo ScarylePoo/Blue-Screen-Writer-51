@@ -13,6 +13,15 @@ Blue Screen Writer 51 needs no installation and no administrator rights. You unz
 
 You now have a folder called *Blue Screen Writer 51*.
 
+### Linux and macOS
+
+Blue Screen Writer 51 is made for Windows, but there are also packages for Linux and macOS on the Releases page:
+
+- **Linux** (64-bit PC, Ubuntu 22.04 / Debian 12 / Fedora 36 or newer): download `BlueScreenWriter51-…-linux-x64.tar.gz`, unpack it, and run `./bsw51` in the folder. For a menu entry, edit the included `bsw51.desktop` (put in the folder's path) and copy it to `~/.local/share/applications/`.
+- **macOS 11 or newer** (Apple Silicon and Intel): download `BlueScreenWriter51-…-macos-universal.zip`, open it, and drag *Blue Screen Writer 51.app* into *Applications*. The app is not signed by Apple, so the first time **right-click** it and choose **Open**, then **Open** again (or use *System Settings → Privacy & Security → Open Anyway*). On a Mac the **Option** key is Alt, and the function keys need the **fn** key unless you switch on "Use F1, F2, etc. keys as standard function keys".
+
+On both, everything works except **printing and PDF** (they use the Windows printer system; save as .docx or .odt with Ctrl-F5, 3 and print from another program) and *Setup 7* (registering with Windows). Settings, revisions and recovery copies are in `~/.config/blue-screen-writer-51`; on a Mac, your macros go into its `WPM` folder.
+
 ## What is in the folder
 
 | Item | What it is |

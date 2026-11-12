@@ -13,6 +13,8 @@ The program is written in Rust. Its source code is public domain ([The Unlicense
 rustup toolchain install stable-x86_64-pc-windows-gnu
 ```
 
+On **Linux**: Rust stable, a C compiler for linking (`build-essential`) and the windowing headers: `sudo apt-get install pkg-config libx11-dev libxkbcommon-dev libwayland-dev` (Debian/Ubuntu names). On **macOS**: Rust stable and the Xcode command line tools. Then `cargo build --release` and `cargo test` as below.
+
 ## Building
 
 From the repository folder:
@@ -91,7 +93,9 @@ git push origin v1.0.1
 
 - or it is started by hand from the **Actions** tab (you type the version number).
 
-The workflow, on a Windows machine:
+The workflow builds three packages at the same time — Windows (zip), Linux x64 (tar.gz, built on Ubuntu 22.04) and macOS (a universal app for Apple Silicon and Intel, zipped) — and then attaches all three to the release. A **dry run** (tick *dry_run* when starting it by hand) only builds the packages; you can download them from the run's page.
+
+The Windows part:
 
 1. puts the version number into `Cargo.toml` (so it appears in the program's Windows properties);
 2. installs the `stable-x86_64-pc-windows-gnu` toolchain;
@@ -99,7 +103,11 @@ The workflow, on a Windows machine:
 4. builds `bsw51.exe` (`cargo build --release`);
 5. packages the program, the `dict`, `thes` and `hyph` folders, an empty `WPM` folder, the licences and `READ ME.txt`;
 6. converts `docs/GUIDE.md` into `Guide - What Is New.docx` using the program itself;
-7. zips everything as `BlueScreenWriter51-<version>-windows-x64.zip` and attaches it to the release (creating the release if it does not exist yet).
+7. zips everything as `BlueScreenWriter51-<version>-windows-x64.zip`.
+
+Linux and macOS do the same with `cargo build --release` (macOS twice, for `aarch64-apple-darwin` and `x86_64-apple-darwin`, joined with `lipo`, put into an `.app` bundle with its icon and an ad-hoc signature). A last job attaches the three packages to the release (creating the release if it does not exist yet).
+
+Every push is also built and tested on all three systems by `.github/workflows/ci.yml`.
 
 ## Developer documentation
 

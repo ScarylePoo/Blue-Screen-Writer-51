@@ -12,9 +12,13 @@ It is a clean-room re-implementation written from scratch in Rust. It contains n
 
 ## Download
 
-Get the latest `BlueScreenWriter51-…-windows-x64.zip` from the [Releases](../../releases) page, unzip it anywhere (for example into *Documents*), and double-click `bsw51.exe`. No installation, no administrator rights. Keep the folders `dict`, `thes`, `hyph` and `WPM` next to the program.
+From the [Releases](../../releases) page — no installation, no administrator rights:
 
-Windows 10 and 11 (64-bit).
+- **Windows 10/11** (64-bit): `BlueScreenWriter51-…-windows-x64.zip`. Unzip it anywhere (for example into *Documents*) and double-click `bsw51.exe`. Keep the folders `dict`, `thes`, `hyph` and `WPM` next to the program.
+- **Linux** x64 (glibc 2.35+, X11 or Wayland): `BlueScreenWriter51-…-linux-x64.tar.gz`. Unpack and run `./bsw51`.
+- **macOS 11+** (Apple Silicon and Intel): `BlueScreenWriter51-…-macos-universal.zip` with *Blue Screen Writer 51.app*. The app is not signed by Apple: the first time, right-click it and choose **Open**.
+
+Windows is the main platform. On Linux and macOS everything works except printing and PDF (they use the Windows printer system — save as .docx or .odt and print from another program) and registering as the default program.
 
 ## What stays the same
 
@@ -63,7 +67,12 @@ If you know 5.1, you already know this program:
 
 ## Building from source
 
-Requires Rust (stable) with the `x86_64-pc-windows-gnu` toolchain; it uses the toolchain's own bundled linker, so no Visual Studio or MSYS2 is needed.
+Windows: requires Rust (stable) with the `x86_64-pc-windows-gnu` toolchain; it uses the toolchain's own bundled linker, so no Visual Studio or MSYS2 is needed.
+
+Linux: Rust stable plus `pkg-config libx11-dev libxkbcommon-dev libwayland-dev` (Debian/Ubuntu names); `cargo build --release`.
+macOS: Rust stable (Xcode command line tools); `cargo build --release`.
+
+Every push is built and tested on all three systems by [the CI workflow](.github/workflows/ci.yml).
 
 ```
 rustup toolchain install stable-x86_64-pc-windows-gnu
@@ -83,7 +92,7 @@ Developer documentation: [architecture and conventions](docs/ARCHITECTURE.md), [
 
 ## Releases
 
-Creating a release on GitHub (Releases → Draft a new release, with a new tag such as `v1.0.1`), or pushing such a tag, runs [the release workflow](.github/workflows/release.yml): it runs the tests, builds `bsw51.exe` with that version number, converts the guide to .docx, packages program, dictionaries and licences into a zip and attaches it to the release (creating the release if it does not exist yet). It can also be started by hand from the Actions tab.
+Creating a release on GitHub (Releases → Draft a new release, with a new tag such as `v1.0.1`), or pushing such a tag, runs [the release workflow](.github/workflows/release.yml): it runs the tests, builds `bsw51.exe` with that version number, converts the guide to .docx, packages program, dictionaries and licences for Windows, Linux and macOS and attaches the three packages to the release (creating the release if it does not exist yet). It can also be started by hand from the Actions tab.
 
 ```
 git tag v1.0.1
