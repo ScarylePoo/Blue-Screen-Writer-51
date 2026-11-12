@@ -38,6 +38,7 @@ If you know 5.1, you already know this program:
 - Documents are saved as **Word documents (.docx)** that open in Word, LibreOffice and on phones. Everything the editor knows (every code you see in Reveal Codes) is kept exactly, even after the file was edited in Word.
 - Opens about 25 formats: Word (.docx, .doc, Word for DOS, Word 2), WordPerfect 4.2–6+ (.wp, .wp5, .wpd, …), OpenDocument, RTF, HTML, Markdown, WordStar, Works, Write, Ami Pro, AbiWord, Outlook e-mails (.msg), plain text in any encoding, and the text of PDFs — and, like Notepad, anything else as text.
 - Save As Word, **PDF**, ODT, RTF, HTML or text; password-protected documents compatible with Word.
+- A **home directory** that F5 List Files always starts in (Setup → Location of Files → Documents).
 - Long file names with spaces and accents, mapped drives and `\\server\share` paths. Shift-F10 + Up arrow recalls recent documents.
 - Can be registered as the Windows program for .docx/.doc/.wpd (Setup → 7).
 

@@ -53,9 +53,9 @@ Start the program with a file (drag the file onto `bsw51.exe`), or register the 
 
 ## F5 List Files
 
-1. Press **F5**. The prompt shows `Dir C:\Users\…\Documents\*.*` (the current folder).
+1. Press **F5**. The prompt shows `Dir C:\Users\…\Documents\*.*`: your **home directory** if you set one (Shift-F1, 6 Location of Files, 7 Documents), otherwise the current folder. With a home directory, F5 always starts there, wherever you looked last; just edit the path to look elsewhere this time.
 2. Press **Enter** to list this folder, or type another folder or a pattern (for example `S:\Letters\*.docx`) and press **Enter**.
-   - To **change the current folder** permanently for this session, type **=** first. The prompt changes to `New directory =`; type the folder and press Enter.
+   - To **change the current folder** permanently for this session, type **=** first. The prompt changes to `New directory =`; type the folder and press Enter. With a home directory set, the prompt reads `Home directory =` and changes your home directory (kept for next time).
 
 The list shows all files with their full long names, sizes, dates and times, the parent folder (`..`) and sub-folders. At the top are the folder name, the size of the current document, the free disk space and the number of files.
 

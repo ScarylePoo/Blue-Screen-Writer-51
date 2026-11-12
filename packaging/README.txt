@@ -24,6 +24,7 @@ FILES
  and like Notepad any other file as text.
  Arabic (right to left), Chinese, Japanese and Korean are supported.
  F5 List Files: long names, spaces, network drives, \\server\share paths.
+ Home directory (F5 always starts there): Shift-F1 -> 6 -> 7 Documents.
  Ctrl-F5 3 Save As: Word, PDF, ODT, RTF, HTML, text (several encodings).
  Double-click documents in Windows: Shift-F1 -> 7 -> Register, then choose
  Blue Screen Writer 51 in the Windows "Default apps" window that opens.

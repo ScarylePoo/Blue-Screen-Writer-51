@@ -240,8 +240,10 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
         List => (
             "List (List Files)",
             &[
-                "Shows the files in a folder.  Press Enter to list the current",
+                "Shows the files in a folder.  Press Enter to list the suggested",
                 "folder, or type another one (\"=\" changes the default folder).",
+                "With a home directory (Setup 6 Location of Files, 7 Documents),",
+                "F5 always suggests it, and \"=\" changes the home directory.",
                 "",
                 "In the list, move with the arrow keys or the mouse and choose:",
                 "1 Retrieve; 2 Delete; 3 Move/Rename; 4 Print; 5 Short/Long",
@@ -330,7 +332,8 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
                 "Codes window); 3 Environment (backup, autosave, units, Alternate",
                 "Keyboard); 4 Initial Settings (date format, initial codes, repeat",
                 "value); 5 Keyboard Layout (choose, edit or map .WPK keyboards);",
-                "6 Location of Files.",
+                "6 Location of Files (7 Documents = your home directory, which",
+                "F5 List Files always suggests).",
             ],
         ),
         Switch => (

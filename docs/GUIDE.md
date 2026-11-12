@@ -47,6 +47,8 @@ Folders work the same way: *Documents*, *Desktop*, mapped network drives such as
 
 **F5 List Files** shows full names, with their dates and sizes. The keys are the ones you know (1 Retrieve, 3 Move/Rename, 6 Look, and so on). Long names are shown in full.
 
+**Home directory:** set your usual folder in Shift-F1, 6 Location of Files, 7 Documents. F5 then always suggests that folder, even after you looked somewhere else. Edit the path to look elsewhere just this once; typing **=** in F5 changes the home directory.
+
 ### Retrieving recent documents
 
 Press **Shift-F10** (Retrieve). At *Document to be retrieved:* press the **Up arrow**. It goes through the last 9 documents you used. Press Enter to open the one shown.

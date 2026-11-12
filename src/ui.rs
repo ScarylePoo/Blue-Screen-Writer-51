@@ -414,6 +414,12 @@ impl Wp {
         !self.screens.is_empty()
     }
 
+    /// The home directory (Setup → Location of Files → 7 Documents), if set
+    /// and present.  F5 always suggests it.
+    pub fn home_dir(&self) -> Option<PathBuf> {
+        self.settings.default_dir.clone().filter(|d| d.is_dir())
+    }
+
     pub fn resolve_path(&self, s: &str) -> PathBuf {
         let s = s.trim().trim_matches('"');
         let p = Path::new(s);

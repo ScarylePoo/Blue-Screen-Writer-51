@@ -112,7 +112,7 @@ Opens the list of `.WPK` keyboard files: select, create, edit or map keyboards, 
 | **1 Backup Files** | Folder for timed backups (the same as Backup Directory above). | `%APPDATA%\Blue Screen Writer 51\Backup` |
 | **2 Keyboard/Macro Files** | Folder for `.WPM` macros and `.WPK` keyboards. | The `WPM` folder next to the program, then the program folder |
 | **5 Style Files** and **Library Filename** | Folder for style files, and the style library used by Alt-F8. | `STYLE\LIBRARY.STY` next to the program, if it exists |
-| **7 Documents** | The folder the program starts in (for F5, F10 and Shift-F10). | The folder the program was started from |
+| **7 Documents (home directory)** | Your home directory: the program starts in it, and **F5 always suggests it**, even after you looked at other folders. In F5, typing **=** changes it. | None: F5 suggests the current folder, starting with the folder the program was started from |
 
 A folder that does not exist is refused with `ERROR: Directory not found`.
 

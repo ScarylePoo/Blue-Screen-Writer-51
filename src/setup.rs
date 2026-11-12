@@ -370,7 +370,7 @@ fn locations() -> Box<dyn Screen> {
         ), "    Library Filename"),
         path_item(
             '7',
-            "~Documents",
+            "~Documents (home directory)",
             |wp| wp.settings.default_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
             |s, p| s.default_dir = p,
         ),

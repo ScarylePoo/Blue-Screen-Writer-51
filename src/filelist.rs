@@ -123,7 +123,10 @@ pub struct FileList {
 }
 
 pub fn open_dir_prompt(wp: &mut Wp) {
-    wp.push(Box::new(DirPrompt { text: format!("{}", wp.cwd.join("*.*").display()).chars().collect(), first: true, change_default: false }));
+    // F5 always suggests the home directory when one is set; otherwise the
+    // current directory (as in 5.1).
+    let dir = wp.home_dir().unwrap_or_else(|| wp.cwd.clone());
+    wp.push(Box::new(DirPrompt { text: format!("{}", dir.join("*.*").display()).chars().collect(), first: true, change_default: false }));
 }
 
 /// "Dir C:\WP51\*.*" — typing '=' first switches to "New directory =".
@@ -139,7 +142,8 @@ impl Screen for DirPrompt {
         match i {
             Input::Char('=') if first => {
                 self.change_default = true;
-                self.text = format!("{}", wp.cwd.display()).chars().collect();
+                let dir = wp.home_dir().unwrap_or_else(|| wp.cwd.clone());
+                self.text = format!("{}", dir.display()).chars().collect();
                 self.first = true;
             }
             Input::Char(c) => {
@@ -158,6 +162,11 @@ impl Screen for DirPrompt {
                 let p = normalize(&wp.resolve_path(&s));
                 if self.change_default {
                     if p.is_dir() {
+                        // with a home directory, '=' changes it (and keeps it)
+                        if wp.home_dir().is_some() {
+                            let home = p.clone();
+                            crate::setup::change(wp, |s| s.default_dir = Some(home));
+                        }
                         wp.cwd = p.clone();
                         // WP then shows "Dir <newdir>\*.*"
                         self.change_default = false;
@@ -180,14 +189,19 @@ impl Screen for DirPrompt {
         let row = g.rows - 1;
         let st = wp.theme.normal;
         g.fill_row(row, 0, g.cols, ' ', st);
-        let label = if self.change_default { "New directory = " } else { "Dir " };
+        let home = wp.home_dir().is_some();
+        let label = match (self.change_default, home) {
+            (true, true) => "Home directory = ",
+            (true, false) => "New directory = ",
+            _ => "Dir ",
+        };
         let c = g.text(0, row, label, st);
         let s: String = self.text.iter().collect();
         let avail = g.cols - c - 1;
         let shown: String = if s.chars().count() > avail { s.chars().skip(s.chars().count() - avail).collect() } else { s.clone() };
         let end = g.text(c, row, &shown, st);
         if self.first && !self.change_default {
-            let hint = "(Type = to change default Dir)";
+            let hint = if home { "(Type = to change home Dir)" } else { "(Type = to change default Dir)" };
             if end + 3 + hint.len() < g.cols {
                 g.text(g.cols - hint.len() - 1, row, hint, st);
             }
@@ -715,5 +729,36 @@ mod tests {
     fn dates() {
         assert_eq!(civil_from_days(0), (1970, 1, 1));
         assert_eq!(fmt_thousands(1234567), "1,234,567");
+    }
+}
+
+#[cfg(test)]
+mod home_dir_tests {
+    use crate::grid::Grid;
+    use crate::keys::{Func, Input};
+    use crate::ui::Wp;
+
+    fn bottom(wp: &Wp) -> String {
+        let mut g = Grid::new(80, 25, wp.theme.normal);
+        wp.draw(&mut g);
+        (0..80).map(|c| g.get(c, 24).unwrap().ch).collect()
+    }
+
+    #[test]
+    fn f5_always_suggests_the_home_directory() {
+        let home = std::env::temp_dir().join("bsw51-home-test");
+        let other = home.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        let mut wp = Wp::new(80, 25);
+        wp.settings.default_dir = Some(home.clone());
+        wp.cwd = other.clone(); // e.g. after F5 → 7 Other Directory
+        wp.input(Input::Func(Func::List));
+        let line = bottom(&wp);
+        assert!(line.contains(&format!("Dir {}", home.join("*.*").display())), "{line}");
+        wp.input(Input::Func(Func::Cancel));
+        // without a home directory: the current directory, as in 5.1
+        wp.settings.default_dir = None;
+        wp.input(Input::Func(Func::List));
+        assert!(bottom(&wp).contains(&format!("Dir {}", other.join("*.*").display())));
     }
 }
