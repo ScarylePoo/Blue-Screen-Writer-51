@@ -81,11 +81,11 @@ Developer documentation: [architecture and conventions](docs/ARCHITECTURE.md), [
 
 ## Releases
 
-Pushing a tag such as `v0.2.0` runs [the release workflow](.github/workflows/release.yml): it runs the tests, builds `bsw51.exe` with that version number, converts the guide to .docx, packages program, dictionaries and licences into a zip and publishes a GitHub release. It can also be started by hand from the Actions tab.
+Creating a release on GitHub (Releases → Draft a new release, with a new tag such as `v1.0.1`), or pushing such a tag, runs [the release workflow](.github/workflows/release.yml): it runs the tests, builds `bsw51.exe` with that version number, converts the guide to .docx, packages program, dictionaries and licences into a zip and attaches it to the release (creating the release if it does not exist yet). It can also be started by hand from the Actions tab.
 
 ```
-git tag v0.2.0
-git push origin v0.2.0
+git tag v1.0.1
+git push origin v1.0.1
 ```
 
 ## Licence

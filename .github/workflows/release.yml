@@ -1,7 +1,9 @@
 name: Release
 
-# Push a tag like v0.2.0 to build and publish a release, or start it by hand
-# from the Actions tab (then give the version, e.g. 0.2.0).
+# Build and publish a release when a tag like v1.0.0 is pushed — also when the
+# release is created on the GitHub website (that creates the tag; the zip is
+# then attached to it).  Or start it by hand from the Actions tab and give the
+# version (e.g. 1.0.1).
 on:
   push:
     tags: ["v*"]
@@ -21,7 +23,7 @@ jobs:
       run:
         shell: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Version
         id: ver
@@ -83,4 +85,13 @@ jobs:
           Unzip anywhere and double-click **bsw51.exe** (Windows 10/11, 64-bit). No installation needed.
           Keep the folders dict, thes, hyph and WPM next to the program. New to the extras? Open *Guide - What Is New.docx*.
           "@
-          gh release create "v$v" "BlueScreenWriter51-$v-windows-x64.zip" --title "Blue Screen Writer 51 $v" --notes $notes --target "${{ github.sha }}"
+          $zip = "BlueScreenWriter51-$v-windows-x64.zip"
+          # a release made on the website already exists (that created the tag):
+          # just attach the zip to it; otherwise create the release
+          gh release view "v$v" *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload "v$v" $zip --clobber
+          } else {
+            gh release create "v$v" $zip --title "Blue Screen Writer 51 $v" --notes $notes --target "${{ github.sha }}"
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
