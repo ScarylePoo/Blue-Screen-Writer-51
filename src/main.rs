@@ -284,6 +284,7 @@ fn main() {
     let mut script: Option<String> = None;
     let mut dump: Option<PathBuf> = None;
     let mut png_out: Option<PathBuf> = None;
+    let mut recover: Option<PathBuf> = None;
     let mut files = Vec::new();
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
@@ -295,6 +296,7 @@ fn main() {
             "--config" => {
                 it.next();
             }
+            "--recover" => recover = it.next().map(PathBuf::from),
             _ => files.push(a),
         }
     }
@@ -307,7 +309,12 @@ fn main() {
         }
     }
 
-    wp.offer_recoveries();
+    // A window started for one recovery copy leaves the other copies to
+    // the window that started it.
+    match &recover {
+        Some(f) => wp.recover_file(f),
+        None => wp.offer_recoveries(),
+    }
 
     if let Some(s) = script {
         // Headless mode for automated testing.
@@ -357,7 +364,9 @@ fn main() {
             wp.draw_pixels(&mut buf, w, h, r.cell_h);
             let _ = std::fs::write(p, png::encode(&buf, w, h));
         }
+        history::shutdown();
         return;
     }
     app::run(wp);
+    history::shutdown();
 }

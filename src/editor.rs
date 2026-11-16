@@ -50,6 +50,18 @@ pub struct Editor {
     pub clipboard: Option<Vec<El>>,
     /// Undo (WP 5.1 had none; this is a modest modern addition).
     undo: UndoLog,
+    /// Modification time of `path` when it was last read or written here;
+    /// autosave only writes while the file on disk is still that version.
+    pub disk_stamp: Option<std::time::SystemTime>,
+    /// Content fingerprint of the last saved state (safety net for changes
+    /// that did not set `modified`).
+    pub clean_fp: Option<u64>,
+    /// A failed autosave has been reported.
+    pub save_warned: bool,
+    /// Never-named document: its autosave file (BSW-Unsaved-….docx) and
+    /// the fingerprint last written there.
+    pub unsaved_file: Option<PathBuf>,
+    pub unsaved_fp: Option<u64>,
 }
 
 impl Editor {
@@ -75,6 +87,11 @@ impl Editor {
             layout_dirty: false,
             clipboard: None,
             undo: UndoLog::default(),
+            disk_stamp: None,
+            clean_fp: None,
+            save_warned: false,
+            unsaved_file: None,
+            unsaved_fp: None,
         }
     }
 

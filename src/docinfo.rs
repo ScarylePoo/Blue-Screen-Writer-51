@@ -290,7 +290,7 @@ const FORMATS: [(&str, &str); 9] = [
     ("~RTF", "rtf"),
     ("~HTML (e-mail)", "html"),
     ("~Text", "txt"),
-    ("Blue Screen Writer ~stream (.wps)", "wps"),
+    ("Blue Screen Writer ~stream (.bsw)", "bsw"),
     ("~Flat ODF (.fodt)", "fodt"),
     ("ODF Te~mplate (.ott)", "ott"),
 ];

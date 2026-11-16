@@ -353,7 +353,7 @@ pub fn save(p: &Path, doc: &Document) -> std::io::Result<()> {
             let s = doc.plain_text(0, doc.len()).replace('\n', "\r\n");
             write_atomic(p, s.as_bytes())
         }
-        "wps" => write_atomic(p, crate::stream::write(doc).as_bytes()),
+        "bsw" => write_atomic(p, crate::stream::write(doc).as_bytes()),
         "rtf" => write_atomic(p, crate::export::to_rtf(doc).as_bytes()),
         "odt" => write_atomic(p, &crate::odt::write_odt(doc)?),
         "ott" => write_atomic(p, &crate::odt::write_ott(doc)?),
@@ -430,7 +430,7 @@ mod tests {
         d.els.insert(0, El::Code(Code::AttrOn(Attr::Bold)));
         d.els.push(El::Code(Code::AttrOff(Attr::Bold)));
         let s = crate::stream::write(&d);
-        let d2 = load_bytes(Path::new("x.wps"), s.as_bytes(), 0).unwrap();
+        let d2 = load_bytes(Path::new("x.bsw"), s.as_bytes(), 0).unwrap();
         assert_eq!(d2.els, d.els);
     }
 

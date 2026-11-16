@@ -10,17 +10,26 @@ pub struct Revisions {
     list: Vec<Revision>,
     sel: usize,
     top: usize,
+    /// Listing documents that were never saved (one line each).
+    unsaved: bool,
 }
 
 pub fn open(wp: &mut Wp) {
     let id = wp.ed_ref().doc.id.clone();
     let mut list = history::list(&id);
     list.reverse(); // newest first
+    let mut unsaved = false;
+    if list.is_empty() && wp.ed_ref().path.is_none() {
+        // a document without a name and without history: show the texts
+        // of documents that were never saved (left without saving, …)
+        list = history::unsaved_documents();
+        unsaved = true;
+    }
     if list.is_empty() {
         wp.flash("No revisions yet — they are kept every time the document is saved.");
         return;
     }
-    wp.push(Box::new(Revisions { list, sel: 0, top: 0 }));
+    wp.push(Box::new(Revisions { list, sel: 0, top: 0, unsaved }));
 }
 
 fn kind_name(k: &str) -> &'static str {
@@ -30,6 +39,9 @@ fn kind_name(k: &str) -> &'static str {
         "outside" => "Changed outside (e.g. in Word)",
         "recovered" => "Recovered after crash",
         "discarded" => "Left without saving",
+        "restore" => "Text before a restore",
+        "crash" => "Crash recovery copy",
+        "unsaved" => "Unsaved changes (kept)",
         _ => "Saved",
     }
 }
@@ -87,6 +99,11 @@ impl Screen for Revisions {
                 return Outcome::Push(YesNo::new("Replace the current text with this version?", false, move |wp, yes| {
                     if yes {
                         if let Some(d) = history::load_revision(&file) {
+                            // keep the current text as a revision first
+                            let p = wp.ed_ref().path.clone();
+                            if !wp.ed_ref().is_empty() {
+                                history::record(&wp.ed_ref().doc, p.as_deref(), "restore");
+                            }
                             let e = wp.ed();
                             let id = e.doc.id.clone();
                             e.set_els(d.els); // one undo step: Ctrl-Z brings the text back
@@ -115,12 +132,22 @@ impl Screen for Revisions {
     fn draw(&self, wp: &Wp, g: &mut Grid) {
         let st = wp.theme.normal;
         g.clear(st);
-        g.text(0, 0, &format!("Revisions of {}", if wp.doc_label().is_empty() { "this document".into() } else { wp.doc_label() }), st);
-        g.text(1, 2, "Date      Time    Words   Kind", wp.theme.bold);
+        if self.unsaved {
+            g.text(0, 0, "Documents that were never saved", st);
+            g.text(1, 2, "Date      Time    Words   Beginning", wp.theme.bold);
+        } else {
+            g.text(0, 0, &format!("Revisions of {}", if wp.doc_label().is_empty() { "this document".into() } else { wp.doc_label() }), st);
+            g.text(1, 2, "Date      Time    Words   Kind", wp.theme.bold);
+        }
         let vis = g.rows.saturating_sub(5);
         for (r, rev) in self.list.iter().enumerate().skip(self.top).take(vis) {
             let (d, t) = crate::filelist::fmt_time(rev.when);
-            let s = format!("{d}  {t}  {:>6}   {}", rev.words, kind_name(&rev.kind));
+            let s = if self.unsaved {
+                let w = g.cols.saturating_sub(30);
+                format!("{d}  {t}  {:>6}   {}", rev.words, rev.preview.chars().take(w).collect::<String>())
+            } else {
+                format!("{d}  {t}  {:>6}   {}", rev.words, kind_name(&rev.kind))
+            };
             g.text(1, 3 + r - self.top, &s, if r == self.sel { wp.theme.block } else { st });
             wp.hit(3 + r - self.top, 0, g.cols, crate::ui::HitAction::Select(r));
         }

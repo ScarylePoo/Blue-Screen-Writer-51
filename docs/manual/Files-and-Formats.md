@@ -22,7 +22,7 @@ Folders work the same way: *Documents*, *Desktop*, mapped network drives such as
 2. Press **Enter** to keep the name, or type a new name (with or without a folder) and press **Enter**.
 3. If a file with that name exists, you are asked `Replace <name>? No (Yes)`. Press **Y** to replace it, **N** to type another name.
 
-If you type a name **without an extension**, `.docx` is added. If you type another extension, the document is saved in that format: `.txt` (plain text), `.rtf`, `.odt`, `.ott`, `.fodt`, `.htm`/`.html`, `.md` (Markdown) or `.wps` (the program's own code-stream format). Any other extension gives a Word document.
+If you type a name **without an extension**, `.docx` is added. If you type another extension, the document is saved in that format: `.txt` (plain text), `.rtf`, `.odt`, `.ott`, `.fodt`, `.htm`/`.html`, `.md` (Markdown) or `.bsw` (the program's own code-stream format). Any other extension gives a Word document.
 
 If you opened an old or foreign file (for example *LETTER.WP5*, *REPORT.DOC* or *notes.rtf*), F10 offers the same name ending in **.docx**. The old file stays untouched next to it.
 
@@ -103,7 +103,7 @@ Shift-F10 and F5 open almost any word-processor file. The program recognises the
 | Outlook e-mails | .msg |
 | PDF (the text only) | .pdf |
 | Plain text in any common encoding | .txt and others |
-| Blue Screen Writer 51 code stream | .wps (written by Ctrl-F5, 3, 7) |
+| Blue Screen Writer 51 code stream | .bsw (written by Ctrl-F5, 3, 7; older versions used .wps) |
 
 **Outlook e-mails (.msg)** are shown with From, To, Date, Subject and the names of the attachments, followed by the message text.
 
@@ -144,7 +144,7 @@ Saves a **copy** in another format. The document on the screen keeps its own nam
 
 ```
 1 Word (.docx); 2 PDF; 3 OpenDocument (.odt); 4 RTF; 5 HTML (e-mail); 6 Text;
-7 Blue Screen Writer stream (.wps); 8 Flat ODF (.fodt); 9 ODF Template (.ott)
+7 Blue Screen Writer stream (.bsw); 8 Flat ODF (.fodt); 9 ODF Template (.ott)
 ```
 
 1. Choose the format.
@@ -159,7 +159,7 @@ Saves a **copy** in another format. The document on the screen keeps its own nam
 | RTF | Very old word processors. |
 | HTML | Pasting into e-mails or web pages. |
 | Text | Plain text without formatting. |
-| .wps stream | A plain-text file containing every code exactly; useful for troubleshooting. |
+| .bsw stream | A plain-text file containing every code exactly; useful for troubleshooting. |
 | Flat ODF, ODF Template | Special OpenDocument variants. |
 
 ### 4 to 8

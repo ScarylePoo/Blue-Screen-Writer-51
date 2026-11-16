@@ -13,7 +13,7 @@ pub const APP_NAME: &str = "Blue Screen Writer 51";
 /// Extensions we open.
 pub const EXTENSIONS: &[&str] = &[
     "docx", "doc", "dotx", "dot", "docm", "rtf", "odt", "ott", "fodt", "wpd", "wp", "wp5", "wp6", "wp4", "wpt", "wri",
-    "wps", "abw", "sam", "txt", "md", "htm", "html", "pdf",
+    "wps", "bsw", "abw", "sam", "txt", "md", "htm", "html", "pdf",
 ];
 
 // ------------------------------------------------------------------ icon

@@ -301,6 +301,19 @@ pub struct Wp {
     pub last_key: Option<crate::keys::KeyIn>,
 }
 
+/// Start another program window that takes over one recovery copy.
+fn open_recovery_window(file: &Path) -> bool {
+    if cfg!(test) {
+        return false;
+    }
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let mut c = std::process::Command::new(exe);
+    if let Some(cfg) = crate::settings::CONFIG_OVERRIDE.get() {
+        c.arg("--config").arg(cfg);
+    }
+    c.arg("--recover").arg(file).spawn().is_ok()
+}
+
 impl Wp {
     pub fn new(cols: usize, rows: usize) -> Wp {
         Wp {
@@ -341,29 +354,60 @@ impl Wp {
     /// Offer recovery copies left by a crash or power failure.
     pub fn offer_recoveries(&mut self) {
         let list = crate::history::pending_recoveries();
+        // keep every copy in the history before asking anything, so no
+        // answer (or another crash right now) can lose it
+        for r in &list {
+            crate::history::record(&r.doc, r.path.as_deref(), "crash");
+        }
         for r in list.into_iter().rev() {
             let name = r.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(unnamed document)".into());
             let (d, t) = crate::filelist::fmt_time(r.when);
             let q = format!("Recover {name} (autosaved {d} {t})?");
             self.push(YesNo::new(&q, true, move |wp, yes| {
                 if yes {
-                    // into an empty document slot, or Doc 1
-                    let slot = (0..2).find(|&k| wp.docs[k].is_empty() && wp.docs[k].path.is_none()).unwrap_or(0);
-                    let mut ed = Editor::with_doc(r.doc.clone(), r.path.clone());
-                    ed.modified = true;
-                    ed.settle();
-                    wp.docs[slot] = ed;
-                    wp.cur = slot;
-                    wp.apply_doc_theme();
-                    crate::history::record(&wp.docs[slot].doc, r.path.as_deref(), "recovered");
+                    // into an empty document (Doc 1 or Doc 2); if both are
+                    // in use, into a new program window of its own
+                    if !wp.docs.iter().any(|d| d.is_empty() && d.path.is_none()) {
+                        if !crate::links::HEADLESS.load(std::sync::atomic::Ordering::Relaxed) && open_recovery_window(&r.file) {
+                            return None; // the new window takes the copy over
+                        }
+                        wp.flash("Both documents are in use — this copy is offered again at the next start");
+                        return None;
+                    }
+                    wp.take_recovered(r.doc.clone(), r.path.clone());
                 } else {
                     crate::history::record(&r.doc, r.path.as_deref(), "discarded");
                 }
-                let _ = std::fs::remove_file(&r.file);
+                crate::history::remove_recovery_file(&r.file);
                 wp.after_edit();
                 None
             }));
         }
+    }
+
+    /// Put a recovered document into the first empty document.
+    pub fn take_recovered(&mut self, doc: Document, path: Option<PathBuf>) {
+        let slot = (0..2).find(|&k| self.docs[k].is_empty() && self.docs[k].path.is_none()).unwrap_or(0);
+        let mut ed = Editor::with_doc(doc, path.clone());
+        ed.modified = true;
+        ed.settle();
+        self.docs[slot] = ed;
+        self.cur = slot;
+        self.apply_doc_theme();
+        crate::history::record(&self.docs[slot].doc, path.as_deref(), "recovered");
+    }
+
+    /// `--recover <file>`: this window was opened for one recovery copy.
+    pub fn recover_file(&mut self, f: &Path) {
+        match crate::history::read_recovery_file(f) {
+            Some(r) => {
+                self.take_recovered(r.doc, r.path);
+                crate::history::remove_recovery_file(f);
+                self.flash("Recovered after a crash — save with F10");
+            }
+            None => self.flash(&format!("ERROR: Can't read the recovery copy {}", f.display())),
+        }
+        self.after_edit();
     }
 
     pub fn printer_name(&self) -> String {
@@ -658,30 +702,99 @@ impl Wp {
     /// Timed backup (Setup → Environment → Backup): every N minutes write
     /// modified documents to the backup directory as WP{WP}.BK1 / .BK2.
     pub fn maybe_backup(&mut self) {
+        // tell other windows which files are open here
+        crate::history::note_open_files(self.docs.iter().filter_map(|e| e.path.clone()).collect());
+        // while a footnote/header/comment is being edited, docs[cur] holds
+        // that text; the document itself waits in the sub-editor unchanged
+        let sub = self.screens.iter().any(|s| s.kind() == ScreenKind::SubEdit);
         // crash-recovery copies every 30 s while there are unsaved changes
         if self.timers.last_recovery.elapsed() >= crate::history::RECOVERY_EVERY {
             self.timers.last_recovery = std::time::Instant::now();
-            for (k, e) in self.docs.iter().enumerate() {
+            let mut failed = None;
+            for k in 0..2 {
+                if sub && k == self.cur {
+                    continue;
+                }
+                let e = &mut self.docs[k];
+                // safety net: the text changed although nothing marked it
+                let fp = crate::history::fingerprint(&e.doc);
+                match e.clean_fp {
+                    None if !e.modified => e.clean_fp = Some(fp),
+                    Some(c) if !e.modified && c != fp => e.modified = true,
+                    _ => {}
+                }
                 if e.modified {
-                    crate::history::write_recovery(e, k);
+                    if let Err(err) = crate::history::write_recovery(e, k) {
+                        failed = Some(err);
+                    }
                 }
             }
+            match failed {
+                Some(err) if !self.timers.recovery_warned => {
+                    self.timers.recovery_warned = true;
+                    self.flash(&format!("WARNING: Can't write the crash-recovery copy ({err}) — save with F10"));
+                }
+                Some(_) => {}
+                None => self.timers.recovery_warned = false,
+            }
         }
-        // autosave named Word documents to their own file
+        // Autosave: named Word documents to their own file; documents
+        // without a name to a BSW-Unsaved file; anything else (and Word
+        // files that can't be written) into the revision history.
         let am = self.settings.autosave_minutes;
-        if am > 0 && self.timers.last_autosave.elapsed() >= std::time::Duration::from_secs(am as u64 * 60) && self.screens.is_empty() {
+        if am > 0 && self.timers.last_autosave.elapsed() >= std::time::Duration::from_secs(am as u64 * 60) {
             self.timers.last_autosave = std::time::Instant::now();
+            let quiet = !self.screens.is_empty();
             for k in 0..2 {
+                if sub && k == self.cur {
+                    continue;
+                }
                 let e = &self.docs[k];
-                let Some(p) = e.path.clone() else { continue };
+                if !e.modified || e.is_empty() {
+                    continue;
+                }
+                let Some(p) = e.path.clone() else {
+                    self.autosave_unnamed(k);
+                    continue;
+                };
                 let is_docx = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("docx"));
-                if e.modified && is_docx {
-                    if fileio::save(&p, &e.doc).is_ok() {
+                if !is_docx {
+                    // .txt, .doc, .wpd …: keep the text, don't touch the file
+                    crate::history::record(&self.docs[k].doc, Some(&p), "unsaved");
+                    continue;
+                }
+                let name = p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                // Never write over a version that is newer than ours (saved
+                // by another window or program, or a recovered copy): only
+                // F10 may do that, after asking.
+                let on_disk = crate::history::file_stamp(&p);
+                if on_disk != e.disk_stamp {
+                    crate::history::record(&self.docs[k].doc, Some(&p), "unsaved");
+                    if !e.save_warned {
+                        self.docs[k].save_warned = true;
+                        self.flash(&format!("Note: {name} is not autosaved — the file on disk is a different version. Save with F10."));
+                    }
+                    continue;
+                }
+                match fileio::save(&p, &e.doc) {
+                    Ok(()) => {
                         crate::history::record(&self.docs[k].doc, Some(&p), "autosave");
                         crate::history::clear_recovery(&self.docs[k], k);
-                        self.docs[k].modified = false;
-                        if k == self.cur {
+                        let fp = crate::history::fingerprint(&self.docs[k].doc);
+                        let e = &mut self.docs[k];
+                        e.modified = false;
+                        e.save_warned = false;
+                        e.disk_stamp = crate::history::file_stamp(&p);
+                        e.clean_fp = Some(fp);
+                        if k == self.cur && !quiet {
                             self.flash("* Autosaved *");
+                        }
+                    }
+                    Err(err) => {
+                        crate::history::record(&self.docs[k].doc, Some(&p), "unsaved");
+                        if !self.docs[k].save_warned {
+                            self.docs[k].save_warned = true;
+                            self.flash(&format!("ERROR: Autosave of {name} failed — {err}. Save with F10."));
                         }
                     }
                 }
@@ -703,6 +816,61 @@ impl Wp {
                 let _ = fileio::save(&p, &e.doc);
             }
         }
+    }
+
+    /// Where autosave files of never-named documents go: the home
+    /// directory, or the Documents folder.
+    pub fn unsaved_base(&self) -> Option<PathBuf> {
+        #[cfg(test)]
+        {
+            return Some(crate::settings::config_dir());
+        }
+        #[cfg(not(test))]
+        self.home_dir().or_else(crate::sys::documents_dir)
+    }
+
+    /// Autosave a never-named document to its BSW-Unsaved-….docx file (it
+    /// still counts as unsaved: F7 asks for a name as usual).
+    fn autosave_unnamed(&mut self, k: usize) {
+        let fp = crate::history::fingerprint(&self.docs[k].doc);
+        if self.docs[k].unsaved_fp == Some(fp) {
+            return;
+        }
+        crate::history::record(&self.docs[k].doc, None, "autosave");
+        let Some(base) = self.unsaved_base() else { return };
+        let f = self.docs[k].unsaved_file.clone().unwrap_or_else(|| crate::history::unsaved_file(&base, &self.docs[k].doc.id));
+        // (twice: another window may just have removed the empty folder)
+        let attempt = || {
+            f.parent().map(std::fs::create_dir_all).unwrap_or(Ok(())).and_then(|()| {
+                fileio::save(&f, &self.docs[k].doc).map_err(|e| std::io::Error::other(e.to_string()))
+            })
+        };
+        let res = attempt().or_else(|_| attempt());
+        let e = &mut self.docs[k];
+        match res {
+            Ok(()) => {
+                e.unsaved_file = Some(f);
+                e.unsaved_fp = Some(fp);
+                e.save_warned = false;
+            }
+            Err(err) => {
+                if !e.save_warned {
+                    e.save_warned = true;
+                    self.flash(&format!("ERROR: Can't autosave the unnamed document to {} — {err}", f.display()));
+                }
+            }
+        }
+    }
+
+    /// The document got a name or was deliberately dropped: remove the
+    /// autosave file it had while it was unnamed.
+    pub fn drop_unsaved_file(&mut self, k: usize) {
+        let id = self.docs[k].doc.id.clone();
+        let f = self.docs[k].unsaved_file.take().or_else(|| self.unsaved_base().map(|b| crate::history::unsaved_file(&b, &id)));
+        if let Some(f) = f {
+            crate::history::remove_unsaved_file(&f);
+        }
+        self.docs[k].unsaved_fp = None;
     }
 
     pub(crate) fn edit_func(&mut self, f: Func, home: u8) {
@@ -1244,7 +1412,14 @@ impl Wp {
             let p = fileio::with_default_ext(&wp.resolve_path(&s));
             let same = wp.ed_ref().path.as_ref() == Some(&p);
             if p.exists() {
-                let q = format!("Replace {}?", p.display());
+                // warn when the file was saved by another window or program
+                // since it was opened here
+                let elsewhere = same && crate::history::file_stamp(&p) != wp.ed_ref().disk_stamp;
+                let q = if elsewhere {
+                    format!("Replace {}? (it was changed elsewhere since opened here)", p.display())
+                } else {
+                    format!("Replace {}?", p.display())
+                };
                 let p2 = p.clone();
                 let _ = same;
                 return Some(YesNo::new(&q, false, move |wp, yes| {
@@ -1271,9 +1446,24 @@ impl Wp {
 
     pub fn do_save(&mut self, p: &Path) {
         self.flash(&format!("Saving {}", p.display()));
+        // Saved under another name: from now on a separate document with
+        // its own history (and crash-recovery copy).
+        let cur = self.cur;
+        let old_path = self.ed_ref().path.clone();
+        let renamed = old_path.as_deref().is_some_and(|old| !crate::history::same_path(old, p));
+        if renamed {
+            crate::history::clear_recovery(&self.docs[cur], cur);
+            self.ed().doc.id = new_doc_id();
+        }
         let res = fileio::save(p, &self.ed_ref().doc);
         match res {
             Ok(()) => {
+                // its autosave file from the time it had no name has served
+                match &old_path {
+                    None => self.drop_unsaved_file(cur),
+                    Some(old) if renamed && crate::history::is_unsaved_file(old) => crate::history::remove_unsaved_file(old),
+                    _ => {}
+                }
                 let cur = self.cur;
                 let e = self.ed();
                 e.path = Some(p.to_path_buf());
@@ -1282,6 +1472,11 @@ impl Wp {
                 let e = self.ed();
                 crate::history::record(&e.doc, Some(p), "save");
                 crate::history::clear_recovery(&self.docs[cur], cur);
+                let fp = crate::history::fingerprint(&self.docs[cur].doc);
+                let e = &mut self.docs[cur];
+                e.disk_stamp = crate::history::file_stamp(p);
+                e.clean_fp = Some(fp);
+                e.save_warned = false;
                 self.timers.last_autosave = std::time::Instant::now();
                 self.message = None;
             }
@@ -1321,6 +1516,11 @@ impl Wp {
                 crate::history::record(&wp.docs[cur].doc, p.as_deref(), "discarded");
             }
             crate::history::clear_recovery(&wp.docs[cur], cur);
+            if wp.docs[cur].path.is_none() && wp.docs[cur].modified && !wp.docs[cur].is_empty() {
+                // deliberately not saved: the BSW-Unsaved file stays, with
+                // the text as it is now (it is also in the history)
+                wp.autosave_unnamed(cur);
+            }
             if yes {
                 let other = 1 - wp.cur;
                 if wp.docs[other].is_empty() && wp.docs[other].path.is_none() {
@@ -1373,9 +1573,16 @@ impl Wp {
                     self.flash("Note: changed by another program since last saved here — revision kept");
                 }
                 if self.ed_ref().is_empty() && self.ed_ref().path.is_none() {
+                    let other = 1 - self.cur;
+                    if crate::history::open_elsewhere(p) {
+                        self.flash("WARNING: This file is also open in another Blue Screen Writer window");
+                    } else if self.docs[other].path.as_deref().is_some_and(|o| crate::history::same_path(o, p)) {
+                        self.flash(&format!("WARNING: This file is also open as Doc {}", other + 1));
+                    }
                     let reveal = self.ed_ref().reveal;
                     let mut ed = Editor::with_doc(doc, Some(p.to_path_buf()));
                     ed.reveal = reveal;
+                    ed.disk_stamp = crate::history::file_stamp(p);
                     ed.settle();
                     self.docs[self.cur] = ed;
                 } else {
@@ -2368,7 +2575,7 @@ impl Wp {
 pub fn save_label(path: Option<&std::path::Path>) -> String {
     let Some(p) = path else { return String::new() };
     let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
-    const WRITTEN: [&str; 12] = ["docx", "txt", "asc", "wps", "rtf", "odt", "ott", "fodt", "htm", "html", "md", "markdown"];
+    const WRITTEN: [&str; 12] = ["docx", "txt", "asc", "bsw", "rtf", "odt", "ott", "fodt", "htm", "html", "md", "markdown"];
     if WRITTEN.contains(&ext.as_str()) {
         p.display().to_string()
     } else {

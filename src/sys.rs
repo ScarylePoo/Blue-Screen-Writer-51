@@ -63,6 +63,56 @@ pub fn is_hidden(de: &std::fs::DirEntry) -> bool {
     }
 }
 
+/// The user's Documents folder (also when Windows has moved it, e.g. to
+/// OneDrive).
+pub fn documents_dir() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStringExt;
+        #[repr(C)]
+        struct Guid(u32, u16, u16, [u8; 8]);
+        #[link(name = "shell32")]
+        unsafe extern "system" {
+            fn SHGetKnownFolderPath(id: *const Guid, flags: u32, token: *mut core::ffi::c_void, out: *mut *mut u16) -> i32;
+        }
+        #[link(name = "ole32")]
+        unsafe extern "system" {
+            fn CoTaskMemFree(p: *mut core::ffi::c_void);
+        }
+        // FOLDERID_Documents
+        let id = Guid(0xFDD39AD0, 0x238F, 0x46AF, [0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7]);
+        let mut out: *mut u16 = std::ptr::null_mut();
+        let hr = unsafe { SHGetKnownFolderPath(&id, 0, std::ptr::null_mut(), &mut out) };
+        let mut res = None;
+        if hr == 0 && !out.is_null() {
+            let mut n = 0;
+            while unsafe { *out.add(n) } != 0 {
+                n += 1;
+            }
+            let s = unsafe { std::slice::from_raw_parts(out, n) };
+            res = Some(PathBuf::from(std::ffi::OsString::from_wide(s)));
+        }
+        if !out.is_null() {
+            unsafe { CoTaskMemFree(out.cast()) };
+        }
+        res.or_else(|| std::env::var_os("USERPROFILE").map(|h| PathBuf::from(h).join("Documents")))
+    }
+    #[cfg(not(windows))]
+    {
+        let h = PathBuf::from(std::env::var_os("HOME")?);
+        let d = h.join("Documents");
+        Some(if d.is_dir() { d } else { h })
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn documents_folder_is_found() {
+    let d = documents_dir().expect("Documents folder");
+    assert!(d.is_dir(), "{}", d.display());
+}
+
 /// Seconds to add to UTC to get local time.
 pub fn utc_offset_secs() -> i64 {
     #[cfg(windows)]

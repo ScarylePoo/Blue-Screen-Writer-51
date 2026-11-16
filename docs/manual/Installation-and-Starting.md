@@ -81,7 +81,7 @@ You can make Windows open documents in Blue Screen Writer 51 when you double-cli
 
 Windows does not allow a program to make itself the default without asking you, so step 5 is needed once.
 
-The registration is made for your Windows user only and needs no administrator rights. It offers the program for these file types: .docx, .doc, .dotx, .dot, .docm, .rtf, .odt, .ott, .fodt, .wpd, .wp, .wp5, .wp6, .wp4, .wpt, .wri, .wps, .abw, .sam, .txt, .md, .htm, .html and .pdf.
+The registration is made for your Windows user only and needs no administrator rights. It offers the program for these file types: .docx, .doc, .dotx, .dot, .docm, .rtf, .odt, .ott, .fodt, .wpd, .wp, .wp5, .wp6, .wp4, .wpt, .wri, .wps, .bsw, .abw, .sam, .txt, .md, .htm, .html and .pdf.
 
 **If you move the program folder**, register again (Shift-F1, 7, 1), because Windows remembers where the program was.
 
