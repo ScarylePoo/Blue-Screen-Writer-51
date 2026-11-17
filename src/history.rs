@@ -761,6 +761,27 @@ mod safety_tests {
     }
 
     #[test]
+    fn blank_documents_never_get_a_file() {
+        let base = cfg();
+        // opened and left alone
+        let mut wp = Wp::new(80, 25);
+        force_autosave(&mut wp);
+        assert!(!unsaved_file(&base, &wp.ed_ref().doc.id).exists());
+        // only returns and spaces
+        wp.input(Input::Func(crate::keys::Func::Enter));
+        wp.input(Input::Char(' '));
+        wp.input(Input::Func(crate::keys::Func::Enter));
+        force_autosave(&mut wp);
+        assert!(wp.ed_ref().modified);
+        assert!(!unsaved_file(&base, &wp.ed_ref().doc.id).exists());
+        // and left without saving
+        wp.input(Input::Func(crate::keys::Func::Exit));
+        wp.input(Input::Char('n'));
+        wp.input(Input::Char('n'));
+        assert!(!unsaved_file(&base, &wp.ed_ref().doc.id).exists());
+    }
+
+    #[test]
     fn leaving_an_unnamed_document_keeps_its_text_findable() {
         let base = cfg();
         let mut wp = Wp::new(80, 25);

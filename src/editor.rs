@@ -112,6 +112,16 @@ impl Editor {
         self.doc.els.is_empty()
     }
 
+    /// Something worth keeping: text other than spaces and returns, or a
+    /// picture / text box.
+    pub fn has_content(&self) -> bool {
+        self.doc.els.iter().any(|e| match e {
+            El::Ch(c) => !c.is_whitespace(),
+            El::Code(Code::GBox(_)) => true,
+            _ => false,
+        }) || !self.doc.plain_text(0, self.doc.len()).trim().is_empty()
+    }
+
     /// The font metrics this editor lays out with (Mark Text: Generate).
     pub fn metrics(&self) -> &dyn Metrics {
         self.metrics.as_ref()

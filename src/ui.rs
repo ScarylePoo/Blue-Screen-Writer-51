@@ -832,6 +832,10 @@ impl Wp {
     /// Autosave a never-named document to its BSW-Unsaved-….docx file (it
     /// still counts as unsaved: F7 asks for a name as usual).
     fn autosave_unnamed(&mut self, k: usize) {
+        // no file for a blank document (only spaces, returns or codes)
+        if !self.docs[k].has_content() {
+            return;
+        }
         let fp = crate::history::fingerprint(&self.docs[k].doc);
         if self.docs[k].unsaved_fp == Some(fp) {
             return;
