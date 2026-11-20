@@ -150,4 +150,23 @@ mod tests {
         typed(&mut wp, "ny");
         assert!(wp.quit);
     }
+
+    #[test]
+    fn a_dropped_file_opens_in_a_free_document() {
+        let dir = std::env::temp_dir().join(format!("bsw51-drop-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("dropped.txt");
+        std::fs::write(&p, "dropped text").unwrap();
+        let mut wp = Wp::new(80, 25);
+        typed(&mut wp, "busy");
+        wp.open_dropped(&p);
+        assert_eq!(wp.cur, 1, "Doc 1 is in use: the file goes to Doc 2");
+        assert_eq!(wp.docs[1].doc.plain_text(0, 99), "dropped text");
+        assert_eq!(wp.docs[0].doc.plain_text(0, 99), "busy");
+        // into the current document when that is empty
+        let mut wp = Wp::new(80, 25);
+        wp.open_dropped(&p);
+        assert_eq!(wp.cur, 0);
+        assert_eq!(wp.docs[0].doc.plain_text(0, 99), "dropped text");
+    }
 }

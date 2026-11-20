@@ -334,8 +334,16 @@ impl Parser<'_> {
     fn decode(&self, b: &[u8], depth: u32) -> Vec<El> {
         let mut out: Vec<El> = Vec::new();
         // table state: rows seen, cells in current row
+        // tables: rows and cells so far, and the number of columns while
+        // inside a table
         let mut rows = 0u32;
         let mut cells = 0u32;
+        let mut tbl_cols: Option<u32> = None;
+        // attributes of the open cell (bits as in ATTRS), the
+        // justification before the table and the one last set in it
+        let mut cell_attrs: u16 = 0;
+        let mut pre_just = Justify::Full;
+        let mut tbl_just: Option<Justify> = None;
         // start of a cached style expansion (after a style code)
         let mut style_mark: Option<usize> = None;
         let n = b.len();
@@ -396,28 +404,138 @@ impl Parser<'_> {
                     }
                     let raw = &b[i..end];
                     let g = Grp { p: &b[i + 4..end - 4] };
-                    // tables: make the cell text readable inline
+                    // Tables: [Tbl Def], [Row], [Cell], [Tbl Off].  In the
+                    // file every cell's text ends with a hard return that
+                    // belongs to the cell code after it (it is not a line
+                    // of its own); a cell joined across columns is followed
+                    // directly by the next visible cell, so the hidden
+                    // cells are filled in from the column number.
+                    let end_cell = |out: &mut Vec<El>, attrs: &mut u16| {
+                        if matches!(out.last(), Some(El::Code(Code::HRt))) {
+                            out.pop();
+                        }
+                        for bit in (0..16).rev() {
+                            if *attrs & (1 << bit) != 0 {
+                                out.push(code(Code::AttrOff(ATTRS[bit])));
+                            }
+                        }
+                        *attrs = 0;
+                    };
                     match (c, sub) {
                         (0xD2, 0x0B) => {
-                            rows = 0;
-                            cells = 0;
-                        }
-                        (0xDC, 0) => {
-                            if cells > 0 {
-                                out.push(code(Code::Tab));
-                            }
-                            cells += 1;
-                        }
-                        (0xDC, 1) | (0xDD, 1) | (0xDD, 3) => {
-                            if rows > 0 {
+                            let oldcols = (g.w(6) as usize).min(64);
+                            let base = 4 + 24 + 5 * oldcols;
+                            let ncols = (g.w(base + 2) as usize).clamp(1, 64);
+                            let cols: Vec<i32> = (0..ncols).map(|k| (g.w(base + 24 + 2 * k) as i32).max(240)).collect();
+                            let pos = match g.b(base) & 7 {
+                                1 => TblPos::Right,
+                                2 => TblPos::Center,
+                                3 => TblPos::Full,
+                                _ => TblPos::Left,
+                            };
+                            if !matches!(out.last(), None | Some(El::Code(Code::HRt | Code::HPg))) {
                                 out.push(code(Code::HRt));
                             }
-                            rows += 1;
-                            cells = 0;
-                        }
-                        (0xDC, 2) | (0xDD, 2) => {
+                            out.push(code(Code::TblDef { cols }));
+                            if pos != TblPos::Left {
+                                out.push(code(Code::TblOpt(TblOpt { pos, ..Default::default() })));
+                            }
+                            tbl_cols = Some(ncols as u32);
+                            pre_just = out
+                                .iter()
+                                .rev()
+                                .find_map(|e| match e {
+                                    El::Code(Code::Just(j)) => Some(*j),
+                                    _ => None,
+                                })
+                                .unwrap_or(Justify::Full);
+                            tbl_just = None;
+                            cell_attrs = 0;
                             rows = 0;
                             cells = 0;
+                            i = end;
+                            continue;
+                        }
+                        (0xDC, 0) if tbl_cols.is_some() => {
+                            if cells > 0 {
+                                end_cell(&mut out, &mut cell_attrs);
+                            }
+                            let ncols = tbl_cols.unwrap_or(1);
+                            if rows == 0 {
+                                out.push(code(Code::Row));
+                                rows = 1;
+                            }
+                            // cells hidden under a cell joined across
+                            // (offsets count from the start of the group: 4 bytes of header,
+                            // then flags, column, columns joined, rows joined, 4 bytes,
+                            // attributes, justification)
+                            let col = (g.b(5) as u32).min(ncols.saturating_sub(1));
+                            while cells < col {
+                                out.push(code(Code::Cell));
+                                cells += 1;
+                            }
+                            out.push(code(Code::Cell));
+                            cells += 1;
+                            let from_above = g.b(4) & 0x80 != 0 || g.b(6) & 0x80 != 0;
+                            let (cs, rs) = ((g.b(6) & 0x7F).max(1), g.b(7).max(1));
+                            if !from_above && (cs > 1 || rs > 1) {
+                                out.push(code(Code::Join { cols: cs, rows: rs }));
+                            }
+                            // the cell's own justification (0x20: set for
+                            // this cell/column) and attributes
+                            let fmt = g.b(14);
+                            let want = if fmt & 0x20 != 0 {
+                                match fmt & 7 {
+                                    1 => Justify::Full,
+                                    2 => Justify::Center,
+                                    3 | 4 => Justify::Right,
+                                    _ => Justify::Left,
+                                }
+                            } else {
+                                pre_just
+                            };
+                            if want != tbl_just.unwrap_or(pre_just) {
+                                out.push(code(Code::Just(want)));
+                                tbl_just = Some(want);
+                            }
+                            cell_attrs = g.w(12);
+                            for bit in 0..16 {
+                                if cell_attrs & (1 << bit) != 0 {
+                                    out.push(code(Code::AttrOn(ATTRS[bit])));
+                                }
+                            }
+                            i = end;
+                            continue;
+                        }
+                        (0xDC, 1) | (0xDD, 1) | (0xDD, 3) if tbl_cols.is_some() => {
+                            if rows > 0 {
+                                end_cell(&mut out, &mut cell_attrs);
+                                while cells < tbl_cols.unwrap_or(0) {
+                                    out.push(code(Code::Cell));
+                                    cells += 1;
+                                }
+                            }
+                            out.push(code(Code::Row));
+                            rows += 1;
+                            cells = 0;
+                            i = end;
+                            continue;
+                        }
+                        (0xDC, 2) | (0xDD, 2) if tbl_cols.is_some() => {
+                            end_cell(&mut out, &mut cell_attrs);
+                            while rows > 0 && cells < tbl_cols.unwrap_or(0) {
+                                out.push(code(Code::Cell));
+                                cells += 1;
+                            }
+                            out.push(code(Code::TblOff));
+                            if tbl_just.take().is_some_and(|j| j != pre_just) {
+                                out.push(code(Code::Just(pre_just)));
+                            }
+                            tbl_cols = None;
+                            rows = 0;
+                            cells = 0;
+                            i = end;
+                            continue;
                         }
                         _ => {}
                     }
@@ -1482,9 +1600,20 @@ mod tests {
         assert_eq!(note.first(), Some(&El::Code(Code::AttrOn(Attr::Fine))));
         let nt = Document { els: note, ..Default::default() };
         assert!(text(&nt).starts_with("Although only double and single lines"), "{}", text(&nt));
-        assert!(u.iter().any(|n| n == "Tbl Def:Center;4,1.693\",1.844\",1.245\",1.417\""), "{u:?}");
-        assert_eq!(u.iter().filter(|n| *n == "Cell").count(), 16);
-        assert_eq!(u.iter().filter(|n| *n == "Row").count(), 4);
+        // the two tables are real tables: 16 cells in 4 rows in all; the
+        // first has 4 columns and is centred, the second has its first
+        // column joined over three rows
+        let defs: Vec<usize> = d.els.iter().enumerate().filter(|(_, e)| matches!(e, El::Code(Code::TblDef { .. }))).map(|(i, _)| i).collect();
+        let tbls: Vec<crate::tables::Table> = defs.iter().map(|&i| crate::tables::parse(&d.els, i).unwrap()).collect();
+        assert_eq!(tbls.iter().map(|t| t.rows.len()).sum::<usize>(), 4);
+        assert_eq!(tbls.iter().map(|t| t.rows.iter().map(|r| r.len()).sum::<usize>()).sum::<usize>(), 16);
+        let (k, head) = tbls.iter().enumerate().find(|(_, t)| t.rows.len() == 1).expect("1-row table");
+        assert_eq!(head.cols.iter().map(|w| inch(*w)).collect::<Vec<_>>(), ["1.693\"", "1.844\"", "1.245\"", "1.417\""], "{:?}", head.cols);
+        assert_eq!(crate::tables::opt_at(&d.els, defs[k]).pos, TblPos::Center);
+        let tb = tbls.iter().find(|t| t.rows.len() == 3).expect("3-row table");
+        assert_eq!(tb.slots(&d.els)[0][0], crate::tables::Slot::Anchor { cols: 1, rows: 3 });
+        assert!(d.els.iter().any(|e| matches!(e, El::Code(Code::AttrOn(Attr::SmallCaps)))));
+        let _ = &u;
         let fig = d.els.iter().find_map(|e| match e {
             El::Code(Code::GBox(b)) if b.kind == crate::gfx::BoxKind::Figure => Some(b.clone()),
             _ => None,

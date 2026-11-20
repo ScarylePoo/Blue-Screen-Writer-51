@@ -462,6 +462,15 @@ impl ApplicationHandler for App {
             WindowEvent::Focused(true) => {
                 self.mods = ModifiersState::empty();
             }
+            // A file dragged onto the window: open it, in an empty
+            // document when the current one is in use.
+            WindowEvent::DroppedFile(path) => {
+                self.wp.open_dropped(&path);
+                crate::pump(&mut self.wp);
+                if let Some(w) = &self.window {
+                    w.request_redraw();
+                }
+            }
             _ => {}
         }
     }

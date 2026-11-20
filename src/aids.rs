@@ -377,6 +377,9 @@ fn word_before(els: &[El], idx: usize) -> Option<crate::spell::Word> {
     while k > 0 {
         match &els[k - 1] {
             El::Ch(c) if c.is_alphanumeric() || *c == '\'' || *c == '’' => idxs.push(k - 1),
+            // a table cell ends the word: "A" in one cell and "Header" in
+            // the next are not the word "AHeader"
+            El::Code(Code::Cell | Code::Row | Code::TblDef { .. } | Code::TblOff) => break,
             e if crate::editor::is_invisible(e) && !matches!(e, El::Code(Code::Link(_) | Code::LinkEnd)) => {}
             _ => break,
         }

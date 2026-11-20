@@ -440,6 +440,26 @@ impl Wp {
         }
     }
 
+    /// A file dropped on the window: retrieve it into the current document
+    /// if that is empty, otherwise into the first document not in use.
+    pub fn open_dropped(&mut self, p: &Path) {
+        if !self.screens.is_empty() {
+            self.flash("Finish what is on the screen first, then drop the file again");
+            return;
+        }
+        if self.doc_in_use(self.cur) {
+            match (0..self.docs.len()).find(|&k| !self.doc_in_use(k)) {
+                Some(k) => self.switch_to(k),
+                None => {
+                    self.flash("ERROR: All documents are in use — exit one first (F7)");
+                    return;
+                }
+            }
+        }
+        self.retrieve(p);
+        self.after_edit();
+    }
+
     /// Put a recovered document into the first empty document.
     pub fn take_recovered(&mut self, doc: Document, path: Option<PathBuf>) {
         let slot = (0..self.docs.len()).find(|&k| !self.doc_in_use(k)).unwrap_or(0);

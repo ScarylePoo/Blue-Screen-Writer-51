@@ -2095,4 +2095,22 @@ mod tests {
         let back = crate::stream::read(&crate::stream::write(&d)).unwrap();
         assert_eq!(back.els, d.els);
     }
+
+    #[test]
+    fn autocorrect_does_not_read_across_cells() {
+        let mut wp = Wp::new(80, 25);
+        wp.input(Input::Func(Func::ColumnsTable));
+        keys(&mut wp, "213");
+        wp.input(Input::Func(Func::Enter));
+        keys(&mut wp, "1");
+        wp.input(Input::Func(Func::Enter));
+        wp.input(Input::Func(Func::Exit));
+        keys(&mut wp, "Header A");
+        wp.input(Input::Func(Func::Tab));
+        keys(&mut wp, "Header B");
+        wp.input(Input::Func(Func::Tab));
+        keys(&mut wp, "Header C ");
+        let c = codes(&wp);
+        assert!(c.contains("[Cell]Header A[Cell]Header B[Cell]Header C"), "{c}");
+    }
 }

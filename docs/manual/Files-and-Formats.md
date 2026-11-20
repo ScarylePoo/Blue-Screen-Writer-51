@@ -47,6 +47,10 @@ If a document is already on the screen, you are asked `Retrieve into current doc
 
 At `Document to be retrieved:`, press the **Up arrow**. It shows the last document you used; press **Up** again for the one before, up to the last **9** documents. **Down** goes back. Press **Enter** to open the one shown.
 
+### Dragging a file onto the window
+
+Drag a document from Explorer (or Finder, or a Linux file manager) onto the program window to open it. If the current document is in use, the file opens in the first document that is free (Doc 2, Doc 3 …).
+
 ### Opening a document from Windows
 
 Start the program with a file (drag the file onto `bsw51.exe`), or register the program as the Windows program for documents (**Shift-F1**, **7**, see [Installation and Starting](Installation-and-Starting)). Then a double-click in Explorer or in an e-mail opens the document directly.
@@ -105,6 +109,8 @@ Shift-F10 and F5 open almost any word-processor file. The program recognises the
 | PDF (the text only) | .pdf |
 | Plain text in any common encoding | .txt and others |
 | Blue Screen Writer 51 code stream | .bsw (written by Ctrl-F5, 3, 7; older versions used .wps) |
+
+**WordPerfect 5.1 tables** come in as real tables, with their column widths, position, joined cells, and each cell's justification and attributes. The line styles and shading set in 5.1's Table Edit are not read yet: such a table gets the standard lines (double outside, single inside).
 
 **Outlook e-mails (.msg)** are shown with From, To, Date, Subject and the names of the attachments, followed by the message text.
 

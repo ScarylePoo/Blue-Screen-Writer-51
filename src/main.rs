@@ -287,6 +287,14 @@ fn main() {
     let mut png_out: Option<PathBuf> = None;
     let mut recover: Option<PathBuf> = None;
     let mut files = Vec::new();
+    // Start-up switches can also be kept in the file `startup.txt` in the
+    // settings folder (one or more per line, e.g. `/ss=43,80`): useful
+    // where a program can't easily be started with switches (macOS).
+    let mut args = args;
+    if let Ok(t) = std::fs::read_to_string(settings::config_dir().join("startup.txt")) {
+        let extra: Vec<String> = t.lines().filter(|l| !l.trim_start().starts_with('#')).flat_map(|l| l.split_whitespace()).filter(|s| s.to_ascii_lowercase().starts_with("/ss=") || s.starts_with("--ss=")).map(String::from).collect();
+        args.splice(0..0, extra);
+    }
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
         match a.as_str() {
