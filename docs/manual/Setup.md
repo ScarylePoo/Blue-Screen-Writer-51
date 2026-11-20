@@ -28,7 +28,7 @@ Information only. The program uses the normal Windows mouse settings (set them i
 | **2 Screen Font Attributes** | 1 Real bold/italic/underline (letters are drawn bold, slanted, underlined, on top of the colours); 2 Colours only (as on a DOS screen) | Real bold/italic/underline |
 | **3 Text Screen Type** | 1 80x25; 2 80x43; 3 80x50 (number of lines) | 80x25 |
 | **4 Menu Options** | See below | |
-| **5 Screen Size** | 1 Large letters (automatic: 80 columns fill the window; documents with Chinese, Japanese or Korean get just enough extra columns for their lines); 2 Whole page; 3 Classic 80x25; 4 Larger text; 5 Smaller text | Large letters (automatic) |
+| **5 Screen Size** | 1 Automatic (large letters: 80 columns fill the window; documents with Chinese, Japanese or Korean get just enough extra columns for their lines); 2 Whole page; 3 Classic 80 columns; 4 Larger text; 5 Smaller text | Automatic (large letters) |
 | **6 Reveal Codes Window Size** | Number of lines of the Reveal Codes part (1–20), for a 25-line screen | 10 |
 | **7 Filename on the Status Line** | Yes / No | Yes |
 | **8 Comments Display** | Yes / No: show document comments in boxes on the screen | Yes |

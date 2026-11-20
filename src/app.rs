@@ -35,6 +35,8 @@ struct App {
     last_cell: (usize, usize),
     /// Input method (Chinese/Japanese/Korean IME): text being composed
     ime_preedit: String,
+    /// The fixed text screen (columns, rows) the window was last shaped for.
+    shaped: Option<(usize, usize)>,
 }
 
 /// Translate a winit key event into our key model.
@@ -119,6 +121,20 @@ impl App {
         if self.window.is_none() || self.surface.is_none() {
             return;
         }
+        // A fixed text screen (classic mode, /ss=rows,columns): give the
+        // window the shape of that screen, so 80x43 or 80x50 show letters
+        // in their natural proportions instead of squeezed lines.
+        if self.wp.screen_size.is_some() || self.wp.settings.screen_mode == "classic" {
+            if self.shaped != Some((cols, rows)) {
+                let first = self.shaped.is_none();
+                self.shaped = Some((cols, rows));
+                if !(first && (cols, rows) == (80, 25)) {
+                    self.shape_window(cols, rows);
+                }
+            }
+        } else {
+            self.shaped = None;
+        }
         if cols != self.wp.cols || rows != self.wp.rows {
             self.wp.resize(cols, rows);
         }
@@ -172,7 +188,27 @@ impl App {
         self.grid.cursor = Some((col.min(self.grid.cols - 1), cr));
     }
 
+    /// Resize the window to `cols`×`rows` cells of natural proportions,
+    /// keeping its width where the monitor allows.
+    fn shape_window(&self, cols: usize, rows: usize) {
+        let Some(w) = &self.window else { return };
+        let size = w.inner_size();
+        let aspect = self.renderer.cell_aspect().max(0.3);
+        let mut cw = size.width as f32 / cols as f32;
+        let mut ch = cw / aspect;
+        let (mw, mh) = w.current_monitor().map(|m| (m.size().width as f32 * 0.95, m.size().height as f32 * 0.85)).unwrap_or((f32::MAX, f32::MAX));
+        let scale = (mh / (ch * rows as f32)).min(mw / (cw * cols as f32)).min(1.0);
+        cw *= scale;
+        ch *= scale;
+        let want = winit::dpi::PhysicalSize::new((cw * cols as f32).round().max(320.0) as u32, (ch * rows as f32).round().max(200.0) as u32);
+        let _ = w.request_inner_size(want);
+        w.request_redraw();
+    }
+
     fn grid_size(&self, w: usize, h: usize) -> (usize, usize) {
+        if let Some((rows, cols)) = self.wp.screen_size {
+            return (cols, rows);
+        }
         let s = &self.wp.settings;
         if s.screen_mode == "classic" {
             return (80, s.rows.max(25));
@@ -473,6 +509,7 @@ pub fn run(wp: Wp) {
         next_blink: Instant::now() + BLINK,
         last_alt_f4: None,
         ignore_next_f4: false,
+        shaped: None,
         mouse_px: (0.0, 0.0),
         mouse_down: false,
         last_click: None,

@@ -244,6 +244,7 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
                 "folder, or type another one (\"=\" changes the default folder).",
                 "With a home directory (Setup 6 Location of Files, 7 Documents),",
                 "F5 always suggests it, and \"=\" changes the home directory.",
+                "Press F5 twice to return to the list you looked at last.",
                 "",
                 "In the list, move with the arrow keys or the mouse and choose:",
                 "1 Retrieve; 2 Delete; 3 Move/Rename; 4 Print; 5 Short/Long",

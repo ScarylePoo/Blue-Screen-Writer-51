@@ -299,6 +299,11 @@ pub struct Wp {
     /// The physical key behind the input being processed (for screens
     /// that assign keys: Setup → Keyboard Layout → Edit).
     pub last_key: Option<crate::keys::KeyIn>,
+    /// The List Files screen shown last (folder, pattern, file under the
+    /// cursor): F5, F5 shows it again.
+    pub last_list: Option<(PathBuf, String, String)>,
+    /// `/ss=rows,columns` start-up switch: a fixed text screen of that size.
+    pub screen_size: Option<(usize, usize)>,
 }
 
 /// Start another program window that takes over one recovery copy.
@@ -348,6 +353,8 @@ impl Wp {
             drag_from: None,
             split: None,
             last_key: None,
+            last_list: None,
+            screen_size: None,
         }
     }
 

@@ -157,6 +157,15 @@ impl Screen for DirPrompt {
             }
             Input::Func(Func::DelEol) => self.text.clear(),
             Input::Func(Func::Cancel) | Input::Func(Func::Esc) | Input::Func(Func::Exit) => return Outcome::Close,
+            // F5, F5: back to the list shown last time (as in 5.1)
+            Input::Func(Func::List) if first && !self.change_default && wp.last_list.is_some() => {
+                if let Some(f) = FileList::reopen(wp) {
+                    return Outcome::Replace(Box::new(f));
+                }
+                wp.last_list = None;
+                self.first = true;
+                return self.input(wp, i);
+            }
             Input::Func(Func::Enter) | Input::Func(Func::List) => {
                 let s: String = self.text.iter().collect();
                 let p = normalize(&wp.resolve_path(&s));
@@ -179,7 +188,9 @@ impl Screen for DirPrompt {
                     }
                 }
                 let (dir, pat) = split_pattern(&p);
-                return Outcome::Replace(Box::new(FileList::open(dir, pat)));
+                let f = FileList::open(dir, pat);
+                f.remember(wp);
+                return Outcome::Replace(Box::new(f));
             }
             _ => {}
         }
@@ -331,6 +342,37 @@ impl Screen for FileList {
     }
 
     fn input(&mut self, wp: &mut Wp, i: &Input) -> Outcome {
+        let out = self.input_inner(wp, i);
+        // remembered for F5, F5 (the last list, cursor on the same file)
+        self.remember(wp);
+        out
+    }
+
+    fn draw(&self, wp: &Wp, g: &mut Grid) {
+        self.draw_list(wp, g)
+    }
+}
+
+impl FileList {
+    fn remember(&self, wp: &mut Wp) {
+        let name = self.entries.get(self.sel).map(|e| e.name.clone()).unwrap_or_default();
+        wp.last_list = Some((self.dir.clone(), self.pattern.clone(), name));
+    }
+
+    /// The list shown last time, with the cursor on the same file.
+    fn reopen(wp: &Wp) -> Option<FileList> {
+        let (dir, pat, name) = wp.last_list.clone()?;
+        if !dir.is_dir() {
+            return None;
+        }
+        let mut f = FileList::open(dir, pat);
+        if let Some(k) = f.entries.iter().position(|e| e.name == name) {
+            f.sel = k;
+        }
+        Some(f)
+    }
+
+    fn input_inner(&mut self, wp: &mut Wp, i: &Input) -> Outcome {
         let rows = wp.rows;
         let page = self.list_rows(rows) * self.cols();
         let n = self.entries.len();
@@ -547,7 +589,7 @@ impl Screen for FileList {
         Outcome::Keep
     }
 
-    fn draw(&self, wp: &Wp, g: &mut Grid) {
+    fn draw_list(&self, wp: &Wp, g: &mut Grid) {
         let th = &wp.theme;
         let st = th.normal;
         g.clear(st);
@@ -742,6 +784,47 @@ mod home_dir_tests {
         let mut g = Grid::new(80, 25, wp.theme.normal);
         wp.draw(&mut g);
         (0..80).map(|c| g.get(c, 24).unwrap().ch).collect()
+    }
+
+    #[test]
+    fn f5_f5_returns_to_the_last_list() {
+        let dir = std::env::temp_dir().join(format!("bsw51-f5f5-{}", std::process::id()));
+        let sub = dir.join("sub");
+        std::fs::create_dir_all(&sub).unwrap();
+        for n in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(sub.join(n), "x").unwrap();
+        }
+        let mut wp = Wp::new(80, 25);
+        wp.cwd = dir.clone();
+        // list the sub-folder and put the cursor on b.txt
+        wp.input(Input::Func(Func::List));
+        for c in sub.display().to_string().chars() {
+            wp.input(Input::Char(c));
+        }
+        wp.input(Input::Func(Func::Enter));
+        for _ in 0..3 {
+            wp.input(Input::Func(Func::Down));
+        }
+        assert_eq!(wp.last_list.as_ref().map(|l| l.2.as_str()), Some("b.txt"));
+        wp.input(Input::Func(Func::Cancel));
+        assert!(!wp.has_screens());
+        // F5, F5: the same folder again, cursor on b.txt
+        wp.input(Input::Func(Func::List));
+        wp.input(Input::Func(Func::List));
+        let mut g = Grid::new(80, 25, wp.theme.normal);
+        wp.draw(&mut g);
+        let top: String = (0..80).map(|c| g.get(c, 1).unwrap().ch).collect();
+        assert!(top.contains("Files:    3"), "{top}");
+        assert!(wp.last_list.as_ref().is_some_and(|l| l.0.ends_with("sub")));
+        assert_eq!(wp.last_list.as_ref().map(|l| l.2.as_str()), Some("b.txt"));
+        // typing a name at the prompt still lists that folder instead
+        wp.input(Input::Func(Func::Cancel));
+        wp.input(Input::Func(Func::List));
+        for c in dir.display().to_string().chars() {
+            wp.input(Input::Char(c));
+        }
+        wp.input(Input::Func(Func::List));
+        assert!(wp.last_list.as_ref().is_some_and(|l| !l.0.ends_with("sub")));
     }
 
     #[test]

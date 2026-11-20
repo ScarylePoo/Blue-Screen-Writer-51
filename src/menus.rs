@@ -247,8 +247,18 @@ impl Screen for Form {
             Input::Char(c) => {
                 let lc = c.to_ascii_lowercase();
                 let idx = self.items.iter().position(|it| it.key.to_ascii_lowercase() == lc).or_else(|| {
-                    // mnemonic: first letter of label
-                    self.items.iter().position(|it| it.labels.first().and_then(|l| l.chars().find(|c| c.is_alphabetic())).map(|c| c.to_ascii_lowercase()) == Some(lc))
+                    // mnemonic: the highlighted letter (after '~'), or the
+                    // first letter of a label without one
+                    self.items.iter().position(|it| {
+                        it.labels
+                            .first()
+                            .and_then(|l| match l.split_once('~') {
+                                Some((_, rest)) => rest.chars().next(),
+                                None => l.chars().find(|c| c.is_alphabetic()),
+                            })
+                            .map(|c| c.to_ascii_lowercase())
+                            == Some(lc)
+                    })
                 });
                 if let Some(k) = idx {
                     match &self.items[k].edit {
@@ -322,16 +332,27 @@ impl Screen for Form {
         let fr = g.rows - 1;
         if let Some(ci) = self.choice {
             if let Edit::Choice(opts, _) = &self.items[ci].edit {
+                // a list longer than the screen is wide continues on a
+                // second line
+                let len = |o: &&str| o.chars().count() + 4;
+                let total: usize = opts.iter().map(len).sum::<usize>() + 3;
+                let mut row = if total > g.cols && fr > 0 { fr - 1 } else { fr };
+                g.fill_row(row, 0, g.cols, ' ', st);
                 let mut c = 0;
                 for (n, o) in opts.iter().enumerate() {
-                    c = g.text(c, fr, &format!("{} ", n + 1), st);
-                    c = g.text(c, fr, o, st);
+                    if c + len(&o) + 3 > g.cols && row < fr {
+                        row += 1;
+                        g.fill_row(row, 0, g.cols, ' ', st);
+                        c = 0;
+                    }
+                    c = g.text(c, row, &format!("{} ", n + 1), st);
+                    c = g.text(c, row, o, st);
                     if n + 1 < opts.len() {
-                        c = g.text(c, fr, "; ", st);
+                        c = g.text(c, row, "; ", st);
                     }
                 }
-                let c = g.text(c, fr, ": 0", st);
-                g.cursor = Some((c - 1, fr));
+                let c = g.text(c, row, ": 0", st);
+                g.cursor = Some((c - 1, row));
             }
         } else {
             let c = g.text(0, fr, &self.footer, st);

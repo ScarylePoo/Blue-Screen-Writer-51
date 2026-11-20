@@ -117,20 +117,20 @@ fn display() -> Box<dyn Screen> {
         item('4', "~Menu Options", |_| vec![], Edit::Sub(Rc::new(|_| menu_options()))),
         item(
             '5',
-            "Screen ~Size",
+            "Screen Si~ze",
             |wp| {
                 vec![if wp.settings.screen_mode == "classic" {
                     "Classic 80 columns (magnified)".into()
                 } else if wp.settings.screen_mode == "page" {
                     "Grow with window — whole page".into()
                 } else if wp.settings.zoom_px == 0 {
-                    "Large letters (automatic)".into()
+                    "Automatic (large letters)".into()
                 } else {
                     format!("Grow with window — zoom {}px", wp.settings.zoom_px)
                 }]
             },
             Edit::Choice(
-                vec!["Large letters (automatic)", "Whole page", "Classic 80x25", "Larger text", "Smaller text"],
+                vec!["Automatic (large letters)", "Whole page", "Classic 80 columns", "Larger text", "Smaller text"],
                 Rc::new(|wp, k| {
                     set(wp, |s| match k {
                         0 => {
@@ -172,7 +172,7 @@ fn display() -> Box<dyn Screen> {
         ),
         item(
             '8',
-            "Co~mments Display",
+            "C~omments Display",
             |wp| vec![yn(wp.settings.comments_display)],
             Edit::YesNo(Rc::new(|wp, y| set(wp, |s| s.comments_display = y))),
         ),

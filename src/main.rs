@@ -297,6 +297,17 @@ fn main() {
                 it.next();
             }
             "--recover" => recover = it.next().map(PathBuf::from),
+            // /ss=rows,columns (as in 5.1): a fixed text screen of that size
+            s if s.to_ascii_lowercase().starts_with("/ss=") || s.to_ascii_lowercase().starts_with("--ss=") => {
+                let v = &s[s.find('=').unwrap() + 1..];
+                let mut n = v.split(',').map(|x| x.trim().parse::<usize>().ok());
+                if let Some(Some(rows)) = n.next() {
+                    let cols = n.next().flatten().unwrap_or(80);
+                    let (rows, cols) = (rows.clamp(25, 200), cols.clamp(80, 400));
+                    wp.screen_size = Some((rows, cols));
+                    wp.resize(cols, rows);
+                }
+            }
             _ => files.push(a),
         }
     }

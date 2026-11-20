@@ -57,13 +57,15 @@ The letters are large and clear, like the old full-screen DOS mode: 80 columns f
 
 To choose a fixed screen size, go to **Shift-F1**, **2** Display, **5** Screen Size. The choices are:
 
-1. Large letters (automatic) — the standard;
+1. Automatic (large letters) — the standard;
 2. Whole page — the screen grows with the window and shows the full width of the page;
-3. Classic 80x25;
+3. Classic 80 columns;
 4. Larger text;
 5. Smaller text.
 
-**Shift-F1**, **2**, **3** Text Screen Type chooses how many lines the classic screen has: 80x25, 80x43 or 80x50.
+**Shift-F1**, **2**, **3** Text Screen Type chooses how many lines the classic screen has: 80x25, 80x43 or 80x50. When you choose 43 or 50 lines, the window takes the shape of that screen, so the letters keep their natural proportions (they are not squeezed as on old graphics cards).
+
+As in 5.1, a start-up switch sets a text screen of any size for one session: `/ss=rows,columns`, for example `bsw51 /ss=43,80` (on a Mac: `open -a "Blue Screen Writer 51" --args /ss=43,80`). Rows can be 25 to 200, columns 80 to 400.
 
 When a document contains Chinese, Japanese or Korean text, the screen uses a few more columns so that whole lines stay visible.
 
