@@ -143,6 +143,7 @@ pub fn code_to_str(c: &Code) -> String {
         }
         Code::TblDef { cols } => format!("Tbl|{}", cols.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",")),
         Code::Row => "Row".into(),
+        Code::Join { cols, rows } => format!("Join|{cols}|{rows}"),
         Code::RevOn { del, author, date } => format!("Rev|{}|{}|{}", *del as u8, esc(author), esc(date)),
         Code::RevOff { del } => format!("RevOff|{}", *del as u8),
         Code::Cell => "Cell".into(),
@@ -259,6 +260,7 @@ pub fn str_to_code(s: &str) -> Option<Code> {
         },
         "Tbl" => Code::TblDef { cols: p(1).split(',').filter_map(|x| x.parse().ok()).collect() },
         "Row" => Code::Row,
+        "Join" => Code::Join { cols: p(1).parse().unwrap_or(1), rows: p(2).parse().unwrap_or(1) },
         "Rev" => Code::RevOn { del: p(1) == "1", author: unesc(p(2)), date: unesc(p(3)) },
         "RevOff" => Code::RevOff { del: p(1) == "1" },
         "Cell" => Code::Cell,

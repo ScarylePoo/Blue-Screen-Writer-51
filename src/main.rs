@@ -90,6 +90,7 @@ mod sys;
 mod tables;
 mod tabset;
 mod track;
+mod doclist;
 mod revisions;
 mod ui;
 mod wp5;

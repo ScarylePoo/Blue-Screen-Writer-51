@@ -47,6 +47,104 @@ impl Table {
     }
 }
 
+/// What a cell is with regard to joined cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Slot {
+    Normal,
+    /// The first cell of a joined area of `cols` × `rows` cells.
+    Anchor { cols: usize, rows: usize },
+    /// Hidden under the joined cell at (r, c).
+    Covered { r: usize, c: usize },
+}
+
+impl Table {
+    /// The `[Join]` code of cell (r, c): (element index, cols, rows).  It
+    /// sits among the codes at the start of the cell.
+    pub fn join_of(&self, els: &[El], r: usize, c: usize) -> Option<(usize, usize, usize)> {
+        let mut i = self.rows[r][c] + 1;
+        while let Some(El::Code(code)) = els.get(i) {
+            match code {
+                Code::Join { cols, rows } => return Some((i, (*cols).max(1) as usize, (*rows).max(1) as usize)),
+                Code::Row | Code::Cell | Code::TblOff | Code::TblDef { .. } | Code::HRt | Code::Tab => break,
+                _ => i += 1,
+            }
+        }
+        None
+    }
+
+    /// Every cell's role (rows × cells).  Joins are clipped to the table.
+    pub fn slots(&self, els: &[El]) -> Vec<Vec<Slot>> {
+        let mut out: Vec<Vec<Slot>> = self.rows.iter().map(|r| vec![Slot::Normal; r.len()]).collect();
+        for r in 0..self.rows.len() {
+            for c in 0..self.rows[r].len() {
+                if out[r][c] != Slot::Normal {
+                    continue;
+                }
+                let Some((_, cols, rows)) = self.join_of(els, r, c) else { continue };
+                let cols = cols.min(self.rows[r].len() - c);
+                let rows = rows.min(self.rows.len() - r);
+                if cols * rows <= 1 {
+                    continue;
+                }
+                for rr in r..r + rows {
+                    for cc in c..(c + cols).min(self.rows[rr].len()) {
+                        if (rr, cc) != (r, c) && out[rr][cc] == Slot::Normal {
+                            out[rr][cc] = Slot::Covered { r, c };
+                        }
+                    }
+                }
+                out[r][c] = Slot::Anchor { cols, rows };
+            }
+        }
+        out
+    }
+
+    fn has_joins(&self, els: &[El]) -> bool {
+        els[self.def..self.off.min(els.len())].iter().any(|e| matches!(e, El::Code(Code::Join { .. })))
+    }
+}
+
+/// The cursor may not rest in a cell hidden under a joined cell.  Returns
+/// where it should go instead: `forward` = keep moving right (the next
+/// visible cell, or behind the table), `Some(false)` = keep moving left
+/// (the end of the previous visible cell), `None` = the joined cell itself.
+pub fn leave_covered(els: &[El], cursor: usize, forward: Option<bool>) -> Option<usize> {
+    // cheap test first: is there a [Join] in the table around the cursor?
+    let mut d = cursor.min(els.len());
+    loop {
+        if d == 0 {
+            return None;
+        }
+        d -= 1;
+        match els[d] {
+            El::Code(Code::TblOff) => return None,
+            El::Code(Code::TblDef { .. }) => break,
+            _ => {}
+        }
+    }
+    let t = parse(els, d)?;
+    if cursor > t.off || !t.has_joins(els) {
+        return None;
+    }
+    let (r, c) = t.locate(cursor)?;
+    let slots = t.slots(els);
+    let Slot::Covered { r: ar, c: ac } = slots[r][c] else { return None };
+    let flat: Vec<(usize, usize)> = (0..t.rows.len()).flat_map(|r| (0..t.rows[r].len()).map(move |c| (r, c))).collect();
+    let k = flat.iter().position(|&x| x == (r, c))?;
+    let visible = |&&(r, c): &&(usize, usize)| !matches!(slots[r][c], Slot::Covered { .. });
+    Some(match forward {
+        None => t.cell_range(els, ar, ac).0,
+        Some(true) => match flat[k..].iter().find(visible) {
+            Some(&(r, c)) => t.cell_range(els, r, c).0,
+            None => (t.off + 1).min(els.len()),
+        },
+        Some(false) => match flat[..k].iter().rev().find(visible) {
+            Some(&(r, c)) => t.cell_range(els, r, c).1,
+            None => t.def,
+        },
+    })
+}
+
 /// The table containing position `pos`, if any.
 pub fn table_at(els: &[El], pos: usize) -> Option<Table> {
     // find the last [Tbl Def] before pos that is not closed before pos
@@ -133,7 +231,15 @@ pub fn goto_cell(e: &mut Editor, t: &Table, r: usize, c: usize) {
 pub fn tab_in_table(e: &mut Editor, forward: bool) -> bool {
     let Some(t) = table_at(&e.doc.els, e.cursor) else { return false };
     let Some((r, c)) = t.locate(e.cursor) else { return false };
-    let flat: Vec<(usize, usize)> = t.rows.iter().enumerate().flat_map(|(r, row)| (0..row.len()).map(move |c| (r, c))).collect();
+    // (cells hidden under a joined cell are skipped)
+    let slots = t.slots(&e.doc.els);
+    let flat: Vec<(usize, usize)> = t
+        .rows
+        .iter()
+        .enumerate()
+        .flat_map(|(r, row)| (0..row.len()).map(move |c| (r, c)))
+        .filter(|&(rr, cc)| (rr, cc) == (r, c) || !matches!(slots[rr][cc], Slot::Covered { .. }))
+        .collect();
     let k = flat.iter().position(|&x| x == (r, c)).unwrap_or(0);
     let next = if forward { k + 1 } else { k.wrapping_sub(1) };
     if let Some(&(nr, nc)) = flat.get(next) {
@@ -150,6 +256,70 @@ pub fn tab_in_table(e: &mut Editor, forward: bool) -> bool {
 /// ordinary editing?
 pub fn is_structure(e: &El) -> bool {
     matches!(e, El::Code(Code::Row | Code::Cell | Code::TblOff))
+}
+
+fn is_table_code(e: &El) -> bool {
+    matches!(e, El::Code(Code::Row | Code::Cell | Code::TblOff | Code::TblDef { .. }))
+}
+
+/// For the range `from..to`: which elements are structure codes of a table
+/// that lies only partly inside the range.  Those must stay when the range
+/// is deleted, and must not be copied (a table is deleted or copied as a
+/// whole, or only the text in its cells).  `None` when there are none.
+pub fn protected_in(els: &[El], from: usize, to: usize) -> Option<Vec<bool>> {
+    let to = to.min(els.len());
+    if from >= to || !els[from..to].iter().any(is_table_code) {
+        return None;
+    }
+    let mut flags = vec![false; to - from];
+    let mut any = false;
+    let mut i = 0;
+    while i < to {
+        if let El::Code(Code::TblDef { .. }) = els[i] {
+            // this table: def .. off (or the next [Tbl Def] / the end)
+            let mut off = i + 1;
+            while off < els.len() && !matches!(els[off], El::Code(Code::TblOff | Code::TblDef { .. })) {
+                off += 1;
+            }
+            let closed = matches!(els.get(off), Some(El::Code(Code::TblOff)));
+            let last = if closed { off } else { off.saturating_sub(1) };
+            let whole = i >= from && last < to;
+            if !whole {
+                for k in i.max(from)..(last + 1).min(to) {
+                    if is_table_code(&els[k]) {
+                        flags[k - from] = true;
+                        any = true;
+                    }
+                }
+            }
+            i = if closed { off + 1 } else { off };
+        } else {
+            i += 1;
+        }
+    }
+    any.then_some(flags)
+}
+
+/// The text of `from..to` for copying: structure codes of partly covered
+/// tables become tabs (between cells) and hard returns (between rows).
+pub fn copy_range(els: &[El], from: usize, to: usize) -> Vec<El> {
+    let to = to.min(els.len());
+    let Some(flags) = protected_in(els, from, to) else { return els[from..to].to_vec() };
+    let mut out: Vec<El> = Vec::new();
+    for k in from..to {
+        if !flags[k - from] {
+            out.push(els[k].clone());
+            continue;
+        }
+        let first_in_row = k > 0 && matches!(els[k - 1], El::Code(Code::Row | Code::TblDef { .. }));
+        match &els[k] {
+            El::Code(Code::Cell) if !first_in_row && !out.is_empty() => out.push(El::Code(Code::Tab)),
+            El::Code(Code::Row) if !first_in_row && !out.is_empty() => out.push(El::Code(Code::HRt)),
+            El::Code(Code::TblOff) if !out.is_empty() => out.push(El::Code(Code::HRt)),
+            _ => {}
+        }
+    }
+    out
 }
 
 /// Delete [Tbl Def]: turn the table into ordinary text (cells → tabs,
@@ -241,7 +411,115 @@ pub fn columns_tables_menu(wp: &mut Wp) {
 
 /// The Table Edit screen (Alt-F7 inside a table).
 #[derive(Default)]
-pub struct TableEdit {}
+pub struct TableEdit {
+    /// Block on (Alt-F4): the cell where the block of cells started.
+    block: Option<(usize, usize)>,
+}
+
+/// All cell contents of a table (rows × cells).
+fn contents(els: &[El], t: &Table) -> Vec<Vec<Vec<El>>> {
+    (0..t.rows.len())
+        .map(|r| {
+            (0..t.rows[r].len())
+                .map(|c| {
+                    let (a, b) = t.cell_range(els, r, c);
+                    els[a..b].to_vec()
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// Write the table back from its cell contents.
+fn rebuild(e: &mut Editor, t: &Table, cells: Vec<Vec<Vec<El>>>) {
+    let mut v = vec![El::Code(Code::TblDef { cols: t.cols.clone() })];
+    for row in cells {
+        v.push(El::Code(Code::Row));
+        for cell in row {
+            v.push(El::Code(Code::Cell));
+            v.extend(cell);
+        }
+    }
+    v.push(El::Code(Code::TblOff));
+    let end = (t.off + 1).min(e.doc.els.len());
+    e.doc.els.splice(t.def..end, v);
+    e.modified = true;
+    e.relayout();
+}
+
+/// Table Edit, 7 Join: the cells from (r0, c0) to (r1, c1) become one.
+/// Their text is collected in the first cell.
+fn join_cells(wp: &mut Wp, a: (usize, usize), b: (usize, usize)) {
+    TableEdit::with_table(wp, |e, t, _, _| {
+        let slots = t.slots(&e.doc.els);
+        let (mut r0, mut r1) = (a.0.min(b.0), a.0.max(b.0).min(t.rows.len() - 1));
+        let (mut c0, mut c1) = (a.1.min(b.1), a.1.max(b.1).min(t.cols.len() - 1));
+        // joined cells that reach into the area belong to it as a whole
+        loop {
+            let before = (r0, r1, c0, c1);
+            for r in 0..t.rows.len() {
+                for c in 0..t.rows[r].len() {
+                    let (ar, ac) = match slots[r][c] {
+                        Slot::Covered { r, c } => (r, c),
+                        _ => (r, c),
+                    };
+                    let Slot::Anchor { cols, rows } = slots[ar][ac] else { continue };
+                    let hit = ar <= r1 && ar + rows > r0 && ac <= c1 && ac + cols > c0;
+                    if hit {
+                        r0 = r0.min(ar);
+                        r1 = r1.max(ar + rows - 1);
+                        c0 = c0.min(ac);
+                        c1 = c1.max(ac + cols - 1);
+                    }
+                }
+            }
+            if before == (r0, r1, c0, c1) {
+                break;
+            }
+        }
+        if (r0, c0) == (r1, c1) {
+            return;
+        }
+        e.snapshot();
+        let mut cells = contents(&e.doc.els, &t);
+        let mut joined: Vec<El> = Vec::new();
+        for r in r0..=r1 {
+            for c in c0..=c1.min(cells[r].len().saturating_sub(1)) {
+                let mut cell = std::mem::take(&mut cells[r][c]);
+                cell.retain(|el| !matches!(el, El::Code(Code::Join { .. })));
+                let has_text = cell.iter().any(|el| !crate::editor::is_invisible(el));
+                if has_text || (r, c) == (r0, c0) {
+                    if joined.iter().any(|el| !crate::editor::is_invisible(el)) && has_text {
+                        joined.push(El::Code(Code::HRt));
+                    }
+                    joined.extend(cell);
+                }
+            }
+        }
+        joined.insert(0, El::Code(Code::Join { cols: (c1 - c0 + 1) as u8, rows: (r1 - r0 + 1) as u8 }));
+        cells[r0][c0] = joined;
+        rebuild(e, &t, cells);
+        if let Some(t) = parse(&e.doc.els, t.def) {
+            goto_cell(e, &t, r0, c0);
+        }
+    });
+}
+
+/// Table Edit, 8 Split: a joined cell becomes separate cells again.
+fn split_cell(wp: &mut Wp) -> bool {
+    TableEdit::with_table(wp, |e, t, r, c| {
+        let Some((i, _, _)) = t.join_of(&e.doc.els, r, c) else { return false };
+        e.snapshot();
+        e.doc.els.remove(i);
+        e.modified = true;
+        e.relayout();
+        if let Some(t) = parse(&e.doc.els, t.def) {
+            goto_cell(e, &t, r, c);
+        }
+        true
+    })
+    .unwrap_or(false)
+}
 
 impl TableEdit {
     fn with_table<R>(wp: &mut Wp, f: impl FnOnce(&mut Editor, Table, usize, usize) -> R) -> Option<R> {
@@ -253,6 +531,7 @@ impl TableEdit {
 }
 
 fn set_cols(e: &mut Editor, t: &Table, cols: Vec<i32>) {
+    e.snapshot();
     e.doc.els[t.def] = El::Code(Code::TblDef { cols });
     e.modified = true;
     e.relayout();
@@ -260,6 +539,7 @@ fn set_cols(e: &mut Editor, t: &Table, cols: Vec<i32>) {
 
 fn insert_rows(wp: &mut Wp, n: usize) {
     TableEdit::with_table(wp, |e, t, r, _| {
+        e.snapshot();
         let ncols = t.cols.len();
         let at = t.row_codes[r];
         let mut v = vec![];
@@ -282,6 +562,7 @@ fn insert_rows(wp: &mut Wp, n: usize) {
 
 fn insert_cols(wp: &mut Wp, n: usize) {
     TableEdit::with_table(wp, |e, t, r, c| {
+        e.snapshot();
         let mut cols = t.cols.clone();
         // split the current column's width
         let w = (cols[c] / (n as i32 + 1)).max(240);
@@ -307,11 +588,44 @@ fn insert_cols(wp: &mut Wp, n: usize) {
     });
 }
 
-fn delete_rows(wp: &mut Wp, n: usize) {
-    TableEdit::with_table(wp, |e, t, r, _| {
-        if t.rows.len() <= n {
-            return;
+/// Add `n` columns at the right edge (Table Edit, Size).
+fn append_cols(wp: &mut Wp, n: usize) {
+    TableEdit::with_table(wp, |e, t, r, c| {
+        e.snapshot();
+        let mut cols = t.cols.clone();
+        // share the last column's width with the new ones
+        let last = cols.len() - 1;
+        let w = (cols[last] / (n as i32 + 1)).max(240);
+        cols[last] = w;
+        cols.extend(std::iter::repeat_n(w, n));
+        // new cells at the end of every row (from the last row backwards)
+        let mut ends: Vec<usize> = (0..t.rows.len()).map(|ri| t.row_codes.get(ri + 1).copied().unwrap_or(t.off)).collect();
+        ends.sort_unstable_by(|a, b| b.cmp(a));
+        for p in ends {
+            for _ in 0..n {
+                e.doc.els.insert(p, El::Code(Code::Cell));
+            }
         }
+        let def = t.def;
+        e.doc.els[def] = El::Code(Code::TblDef { cols });
+        e.modified = true;
+        e.relayout();
+        if let Some(t) = parse(&e.doc.els, def) {
+            goto_cell(e, &t, r, c);
+        }
+    });
+}
+
+const KEEP_ONE: &str = "ERROR: A table needs one row and one column — to remove the table, delete its [Tbl Def] code";
+
+fn delete_rows(wp: &mut Wp, n: usize) {
+    let refused = TableEdit::with_table(wp, |e, t, r, _| {
+        // as many as there are from this row down, but not the whole table
+        let n = n.min(t.rows.len() - r);
+        if t.rows.len() <= n {
+            return true;
+        }
+        e.snapshot();
         let a = t.row_codes[r];
         let b = t.row_codes.get(r + n).copied().unwrap_or(t.off);
         let removed: Vec<El> = e.doc.els.drain(a..b).collect();
@@ -322,14 +636,20 @@ fn delete_rows(wp: &mut Wp, n: usize) {
         if let Some(t) = parse(&e.doc.els, t.def) {
             goto_cell(e, &t, r.min(t.rows.len() - 1), 0);
         }
+        false
     });
+    if refused == Some(true) {
+        wp.flash(KEEP_ONE);
+    }
 }
 
 fn delete_cols(wp: &mut Wp, n: usize) {
-    TableEdit::with_table(wp, |e, t, r, c| {
-        if t.cols.len() <= n || c + n > t.cols.len() {
-            return;
+    let refused = TableEdit::with_table(wp, |e, t, r, c| {
+        let n = n.min(t.cols.len() - c);
+        if t.cols.len() <= n {
+            return true;
         }
+        e.snapshot();
         let def = t.def;
         // remove cells c..c+n in every row, from the end backwards
         let mut ranges: Vec<(usize, usize)> = vec![];
@@ -356,7 +676,11 @@ fn delete_cols(wp: &mut Wp, n: usize) {
         if let Some(t) = parse(&e.doc.els, def) {
             goto_cell(e, &t, r, c.min(t.cols.len() - 1));
         }
+        false
     });
+    if refused == Some(true) {
+        wp.flash(KEEP_ONE);
+    }
 }
 
 impl Screen for TableEdit {
@@ -366,14 +690,70 @@ impl Screen for TableEdit {
     fn input(&mut self, wp: &mut Wp, i: &Input) -> Outcome {
         let moved = |wp: &mut Wp, dr: isize, dc: isize| {
             TableEdit::with_table(wp, |e, t, r, c| {
-                let nr = (r as isize + dr).clamp(0, t.rows.len() as isize - 1) as usize;
-                let nc = (c as isize + dc).clamp(0, t.cols.len() as isize - 1) as usize;
+                // step over the cells that belong to the same joined cell
+                let slots = t.slots(&e.doc.els);
+                let owner = |r: usize, c: usize| match slots[r][c.min(slots[r].len() - 1)] {
+                    Slot::Covered { r, c } => (r, c),
+                    _ => (r, c.min(slots[r].len() - 1)),
+                };
+                let here = owner(r, c);
+                let (mut nr, mut nc) = (r as isize, c as isize);
+                loop {
+                    let (tr, tc) = (nr + dr, nc + dc);
+                    if tr < 0 || tc < 0 || tr >= t.rows.len() as isize || tc >= t.cols.len() as isize {
+                        break;
+                    }
+                    (nr, nc) = (tr, tc);
+                    if owner(nr as usize, nc as usize) != here {
+                        break;
+                    }
+                }
+                let (nr, nc) = owner(nr as usize, nc as usize);
                 goto_cell(e, &t, nr, nc);
             });
             wp.after_edit();
         };
         match i {
-            Input::Func(Func::Exit) | Input::Func(Func::ColumnsTable) | Input::Func(Func::Cancel) => return Outcome::Close,
+            Input::Func(Func::Cancel) if self.block.is_some() => {
+                self.block = None;
+                wp.ed().block_anchor = None;
+            }
+            Input::Func(Func::Exit) | Input::Func(Func::ColumnsTable) | Input::Func(Func::Cancel) => {
+                wp.ed().block_anchor = None;
+                return Outcome::Close;
+            }
+            // Block on/off: mark cells for Join
+            Input::Func(Func::Block) => {
+                if self.block.take().is_some() {
+                    wp.ed().block_anchor = None;
+                } else {
+                    self.block = TableEdit::with_table(wp, |e, t, r, c| {
+                        e.block_anchor = Some(t.cell_range(&e.doc.els, r, c).0);
+                        (r, c)
+                    });
+                }
+            }
+            Input::Char('7') | Input::Char('j') | Input::Char('J') => {
+                let Some(from) = self.block.take() else {
+                    wp.flash("Block the cells first: Alt-F4, move to the last cell, then 7 Join");
+                    return Outcome::Keep;
+                };
+                wp.ed().block_anchor = None;
+                let Some(to) = TableEdit::with_table(wp, |_, _, r, c| (r, c)) else { return Outcome::Keep };
+                return Outcome::Push(YesNo::new("Join cells?", false, move |wp, yes| {
+                    if yes {
+                        join_cells(wp, from, to);
+                        wp.after_edit();
+                    }
+                    None
+                }));
+            }
+            Input::Char('8') | Input::Char('p') | Input::Char('P') => {
+                if !split_cell(wp) {
+                    wp.flash("This cell is not joined — Split separates cells that were joined with 7 Join");
+                }
+                wp.after_edit();
+            }
             Input::Func(Func::Up) => moved(wp, -1, 0),
             Input::Func(Func::Down) => moved(wp, 1, 0),
             Input::Func(Func::Left) | Input::Func(Func::MarRel) => moved(wp, 0, -1),
@@ -422,6 +802,7 @@ impl Screen for TableEdit {
                             if n > rows {
                                 // append rows after the last one
                                 TableEdit::with_table(wp, |e, t, _, _| {
+                                    e.snapshot();
                                     let mut v = vec![];
                                     for _ in 0..n - rows {
                                         v.push(El::Code(Code::Row));
@@ -440,8 +821,7 @@ impl Screen for TableEdit {
                                 delete_rows(wp, rows - n);
                             }
                         } else if n > cols {
-                            TableEdit::with_table(wp, |e, t, r, _| goto_cell(e, &t, r, t.cols.len() - 1));
-                            insert_cols(wp, n - cols);
+                            append_cols(wp, n - cols);
                         } else if n < cols {
                             TableEdit::with_table(wp, |e, t, r, _| goto_cell(e, &t, r, n));
                             delete_cols(wp, cols - n);
@@ -456,15 +836,35 @@ impl Screen for TableEdit {
                     Some(MenuLine::new(&["~Left", "~Center", "~Right", "~Full"], move |wp, k| {
                         let j = [Justify::Left, Justify::Center, Justify::Right, Justify::Full][k];
                         TableEdit::with_table(wp, |e, t, r, c| {
+                            e.snapshot();
                             let targets: Vec<(usize, usize)> = if scope == 0 {
                                 vec![(r, c)]
                             } else {
                                 (0..t.rows.len()).filter(|rr| c < t.rows[*rr].len()).map(|rr| (rr, c)).collect()
                             };
-                            // insert [Just:x] at the start of each cell (back to front)
-                            let mut starts: Vec<usize> = targets.iter().map(|&(rr, cc)| t.rows[rr][cc] + 1).collect();
-                            starts.sort_unstable_by(|a, b| b.cmp(a));
-                            for s in starts {
+                            // [Just:x] at the start of each cell, and the
+                            // justification that was in effect again where
+                            // the next cell (or the text after the table)
+                            // starts, so it stays in this cell (back to front)
+                            let mut spans: Vec<(usize, usize)> = targets
+                                .iter()
+                                .map(|&(rr, cc)| {
+                                    let (s, end) = t.cell_range(&e.doc.els, rr, cc);
+                                    // first place after the codes that end the cell
+                                    // ([Cell], [Row][Cell] or [Tbl Off])
+                                    let mut after = (end + 1).min(e.doc.els.len());
+                                    if matches!(e.doc.els.get(end), Some(El::Code(Code::Row))) && matches!(e.doc.els.get(after), Some(El::Code(Code::Cell))) {
+                                        after += 1;
+                                    }
+                                    (s, after)
+                                })
+                                .collect();
+                            spans.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+                            for (s, after) in spans {
+                                let before = e.format_state_at(s).just;
+                                if !matches!(e.doc.els.get(after), Some(El::Code(Code::Just(_)))) {
+                                    e.doc.els.insert(after, El::Code(Code::Just(before)));
+                                }
                                 if let Some(El::Code(Code::Just(_))) = e.doc.els.get(s) {
                                     e.doc.els[s] = El::Code(Code::Just(j));
                                 } else {
@@ -540,5 +940,188 @@ mod tests {
         assert_eq!(borders, 3, "{:?}", e.layout.vrows);
         let text_rows = e.layout.vrows.iter().filter(|v| matches!(v, VRow::Lines(ls) if ls.len() == 3)).count();
         assert_eq!(text_rows, 2, "{:?}", e.layout.vrows);
+    }
+
+    // ---- regression tests from the table test pass (issue #1) ----
+
+    fn codes(wp: &Wp) -> String {
+        wp.ed_ref().doc.els.iter().map(|e| match e {
+            El::Ch(c) => c.to_string(),
+            El::Code(c) => crate::reveal::code_text(c),
+        }).collect()
+    }
+
+    fn keys(wp: &mut Wp, s: &str) {
+        for c in s.chars() {
+            wp.input(Input::Char(c));
+        }
+    }
+
+    /// A 3×3 table a1…c3, cursor at the end of c3.
+    fn table33() -> Wp {
+        let mut wp = Wp::new(80, 25);
+        wp.input(Input::Func(Func::ColumnsTable));
+        keys(&mut wp, "213");
+        wp.input(Input::Func(Func::Enter));
+        keys(&mut wp, "3");
+        wp.input(Input::Func(Func::Enter));
+        wp.input(Input::Func(Func::Exit));
+        for (k, cell) in ["a1", "b1", "c1", "a2", "b2", "c2", "a3", "b3", "c3"].iter().enumerate() {
+            if k > 0 {
+                wp.input(Input::Func(Func::Tab));
+            }
+            keys(&mut wp, cell);
+        }
+        wp
+    }
+
+    fn f(wp: &mut Wp, func: Func) {
+        wp.input(Input::Func(func));
+    }
+
+    #[test]
+    fn left_and_right_stop_at_every_cell_edge() {
+        let mut wp = table33();
+        for _ in 0..3 {
+            f(&mut wp, Func::Left);
+        }
+        keys(&mut wp, "L"); // end of b3, not inside it
+        assert!(codes(&wp).contains("[Cell]b3L[Cell]c3"), "{}", codes(&wp));
+        // from the end of a row, Right goes to the first cell of the next
+        let mut wp = table33();
+        f(&mut wp, Func::Up);
+        f(&mut wp, Func::Right);
+        keys(&mut wp, "R");
+        assert!(codes(&wp).contains("[Row][Cell]Ra3"), "{}", codes(&wp));
+    }
+
+    #[test]
+    fn undo_takes_back_one_cell_at_a_time() {
+        let mut wp = table33();
+        wp.ed().undo();
+        let c = codes(&wp);
+        assert!(c.contains("[Cell]b3[Cell][Tbl Off]"), "{c}");
+        wp.ed().undo();
+        assert!(codes(&wp).contains("[Cell]a3[Cell][Cell][Tbl Off]"), "{}", codes(&wp));
+    }
+
+    #[test]
+    fn deleting_part_of_a_table_keeps_its_structure() {
+        let mut wp = table33();
+        let t = table_at(&wp.ed_ref().doc.els, wp.ed_ref().cursor).unwrap();
+        // from the middle of b2 to the middle of b3
+        let from = t.rows[1][1] + 2;
+        let to = t.rows[2][1] + 2;
+        wp.ed().delete_range(from, to, true);
+        let c = codes(&wp);
+        assert!(c.ends_with("[Row][Cell]a2[Cell]b[Cell][Row][Cell][Cell]3[Cell]c3[Tbl Off]"), "{c}");
+        // … and copying it gives text with tabs and returns
+        let wp = table33();
+        let got: String = copy_range(&wp.ed_ref().doc.els, from, to).iter().map(|e| match e {
+            El::Ch(c) => c.to_string(),
+            El::Code(c) => crate::reveal::code_text(c),
+        }).collect();
+        assert_eq!(got, "2[Tab]c2[HRt]a3[Tab]b");
+        // a whole table in the range goes as a whole
+        let mut wp = table33();
+        let n = wp.ed_ref().doc.els.len();
+        wp.ed().delete_range(0, n, true);
+        assert!(wp.ed_ref().doc.els.is_empty());
+    }
+
+    #[test]
+    fn cell_justification_stays_in_its_cell() {
+        let mut wp = table33();
+        f(&mut wp, Func::Up);
+        wp.input(Input::Func(Func::MarRel)); // Shift-Tab: b2
+        f(&mut wp, Func::ColumnsTable);
+        keys(&mut wp, "2cr");
+        f(&mut wp, Func::Exit);
+        let c = codes(&wp);
+        assert!(c.contains("[Cell][Just:Right]b2[Cell][Just:"), "{c}");
+        assert!(!c.contains("[Just:Right]c2") && c.matches("[Just:Right]").count() == 1, "{c}");
+    }
+
+    #[test]
+    fn size_adds_columns_at_the_right_and_delete_is_clamped() {
+        let mut wp = table33();
+        f(&mut wp, Func::ColumnsTable);
+        keys(&mut wp, "1c5");
+        f(&mut wp, Func::Enter);
+        let c = codes(&wp);
+        assert!(c.contains("[Cell]a1[Cell]b1[Cell]c1[Cell][Cell][Row]"), "{c}");
+        // deleting more rows than there are below: down to the last row,
+        // and one Ctrl-Z brings them back
+        let mut wp = table33();
+        f(&mut wp, Func::Up);
+        f(&mut wp, Func::ColumnsTable);
+        f(&mut wp, Func::Del);
+        keys(&mut wp, "r9");
+        f(&mut wp, Func::Enter);
+        f(&mut wp, Func::Exit);
+        assert!(codes(&wp).ends_with("[Cell]c1[Tbl Off]"), "{}", codes(&wp));
+        wp.ed().undo();
+        assert!(codes(&wp).ends_with("[Cell]c3[Tbl Off]"), "{}", codes(&wp));
+        // the whole table can't be deleted this way
+        let mut wp = table33();
+        f(&mut wp, Func::ColumnsTable);
+        wp.ed().cursor = 3; // cell a1
+        f(&mut wp, Func::Del);
+        keys(&mut wp, "r3");
+        f(&mut wp, Func::Enter);
+        assert!(wp.message.as_deref().unwrap_or("").starts_with("ERROR"), "{:?}", wp.message);
+    }
+
+    #[test]
+    fn plain_text_separates_cells_and_rows() {
+        let wp = table33();
+        let d = &wp.ed_ref().doc;
+        assert_eq!(d.plain_text(0, d.len()), "a1\tb1\tc1\na2\tb2\tc2\na3\tb3\tc3\n");
+    }
+
+    #[test]
+    fn join_and_split() {
+        let mut wp = table33();
+        // A1:B1 → one cell holding both texts
+        f(&mut wp, Func::ColumnsTable);
+        wp.ed().cursor = 3;
+        f(&mut wp, Func::Block);
+        f(&mut wp, Func::Right);
+        keys(&mut wp, "7y");
+        let c = codes(&wp);
+        assert!(c.contains("[Row][Cell][Join:2x1]a1[HRt]b1[Cell][Cell]c1[Row]"), "{c}");
+        let t = table_at(&wp.ed_ref().doc.els, wp.ed_ref().cursor).unwrap();
+        let s = t.slots(&wp.ed_ref().doc.els);
+        assert_eq!(s[0], vec![Slot::Anchor { cols: 2, rows: 1 }, Slot::Covered { r: 0, c: 0 }, Slot::Normal]);
+        // Right in Table Edit goes to C1, not into the hidden cell
+        f(&mut wp, Func::Right);
+        assert_eq!(t.locate(wp.ed_ref().cursor), Some((0, 2)));
+        f(&mut wp, Func::Left);
+        assert_eq!(t.locate(wp.ed_ref().cursor), Some((0, 0)));
+        f(&mut wp, Func::Exit);
+        // Tab and the arrow keys skip the hidden cell too
+        f(&mut wp, Func::Tab);
+        assert_eq!(t.locate(wp.ed_ref().cursor), Some((0, 2)));
+        f(&mut wp, Func::Left);
+        keys(&mut wp, "!");
+        assert!(codes(&wp).contains("a1[HRt]b1![Cell][Cell]c1"), "{}", codes(&wp));
+        // the layout: the joined cell is as wide as two columns, no rule inside
+        let lay = &wp.ed_ref().layout;
+        assert!(!lay.tables[0].rule_v(0, 1) && lay.tables[0].rule_v(0, 2) && lay.tables[0].rule_v(1, 1));
+        // 8 Split takes the join away again
+        f(&mut wp, Func::ColumnsTable);
+        keys(&mut wp, "8");
+        assert!(!codes(&wp).contains("[Join"), "{}", codes(&wp));
+        // joining downwards
+        let mut wp = table33();
+        f(&mut wp, Func::ColumnsTable);
+        wp.ed().cursor = 3;
+        f(&mut wp, Func::Block);
+        f(&mut wp, Func::Down);
+        keys(&mut wp, "7y");
+        f(&mut wp, Func::Exit);
+        assert!(codes(&wp).contains("[Cell][Join:1x2]a1[HRt]a2[Cell]b1"), "{}", codes(&wp));
+        let lay = &wp.ed_ref().layout;
+        assert!(!lay.tables[0].rule_h(0, 0) && lay.tables[0].rule_h(0, 1));
     }
 }

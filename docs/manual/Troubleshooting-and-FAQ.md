@@ -93,7 +93,7 @@ These menu choices exist but show "not available yet in this version" or do noth
 
 - **Ctrl-F8**, **5** Print Color;
 - **Ctrl-F7** footnote/endnote **3 New Number** and **4 Options**, and **3 Endnote Placement**;
-- Table Edit **3 Lines**, **4 Header**, **6 Options**, **7 Join**, **8 Split**, and Move/Copy in Table Edit;
+- Table Edit **3 Lines**, **4 Header**, **6 Options**, and Move/Copy in Table Edit;
 - **Ctrl-F4** with a Block: **2 Tabular Column** and **3 Rectangle**; without a Block: **4 Append** after choosing a sentence, paragraph or page;
 - **Shift-F7** **7 Initialize Printer**, and changing **B**, **U**, **G**, **T** on the Print screen;
 - **F5** List Files, Look: **1 Next** and **2 Previous**;

@@ -615,9 +615,21 @@ impl<'a> W<'a> {
         let cell = self.reg(hdr).get("table-cell", "Cell", "><style:table-cell-properties fo:padding=\"0.04in\" fo:border=\"0.5pt solid #000000\"/>");
         let empty_row = vec![];
         let rows: Vec<&Vec<usize>> = if t.rows.is_empty() { vec![&empty_row] } else { t.rows.iter().collect() };
+        // joined cells: spans on the first cell, the cells it covers as
+        // <table:covered-table-cell/>
+        use crate::tables::Slot;
+        let slots = t.slots(els);
         for (r, row) in rows.iter().enumerate() {
             x.push_str("<table:table-row>");
             for c in 0..ncols {
+                let span = match slots.get(r).and_then(|s| s.get(c)) {
+                    Some(Slot::Covered { .. }) => {
+                        x.push_str("<table:covered-table-cell/>");
+                        continue;
+                    }
+                    Some(Slot::Anchor { cols, rows }) => format!(" table:number-columns-spanned=\"{cols}\" table:number-rows-spanned=\"{rows}\""),
+                    _ => String::new(),
+                };
                 let inner = if c < row.len() {
                     let (a, b) = t.cell_range(els, r, c);
                     self.body_pf(&els[a..b], hdr, pf)
@@ -625,7 +637,7 @@ impl<'a> W<'a> {
                     String::new()
                 };
                 let inner = if inner.is_empty() { "<text:p/>".to_string() } else { inner };
-                x.push_str(&format!("<table:table-cell table:style-name=\"{cell}\" office:value-type=\"string\">{inner}</table:table-cell>"));
+                x.push_str(&format!("<table:table-cell table:style-name=\"{cell}\"{span} office:value-type=\"string\">{inner}</table:table-cell>"));
             }
             x.push_str("</table:table-row>");
         }
@@ -1986,12 +1998,23 @@ impl<'a> Rd<'a> {
             self.close_attrs();
             self.els.push(El::Code(Code::Row));
             let mut ncell = 0;
-            for cell in row.nodes().filter(|c| c.name == "table:table-cell") {
+            for cell in row.nodes().filter(|c| c.name == "table:table-cell" || c.name == "table:covered-table-cell") {
                 let rep = cell.attr("table:number-columns-repeated").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).clamp(1, 64);
+                // a cell hidden under a joined cell stays as an empty cell
+                let covered = cell.name == "table:covered-table-cell";
+                let span = |a: &str| cell.attr(a).and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).clamp(1, 255) as u8;
+                let (sc, sr) = (span("table:number-columns-spanned"), span("table:number-rows-spanned"));
                 for _ in 0..rep {
                     self.close_attrs();
                     self.els.push(El::Code(Code::Cell));
                     self.need_sep = false;
+                    if covered {
+                        ncell += 1;
+                        continue;
+                    }
+                    if sc > 1 || sr > 1 {
+                        self.els.push(El::Code(Code::Join { cols: sc, rows: sr }));
+                    }
                     self.blocks(cell);
                     ncell += 1;
                 }
@@ -2409,6 +2432,19 @@ mod tests {
     }
 
     #[test]
+    fn joined_cells_roundtrip() {
+        let d = crate::rtf::tests::joined_doc();
+        let bytes = write_odt(&d).unwrap();
+        let xml = part(&bytes, "content.xml");
+        assert_eq!(xml.matches("table:number-columns-spanned=\"2\"").count(), 2, "{xml}");
+        assert_eq!(xml.matches("table:number-rows-spanned=\"2\"").count(), 2, "{xml}");
+        assert_eq!(xml.matches("<table:covered-table-cell/>").count(), 5, "{xml}");
+        let d2 = read_odt(&bytes).unwrap();
+        crate::rtf::tests::same_joins(&d, &d2);
+        assert_eq!(d2.els, d.els);
+    }
+
+    #[test]
     fn notes_roundtrip() {
         let mut d = Document::from_text("Text");
         d.els.push(code(Code::Note { kind: NoteKind::Foot, els: chars("Fußnote") }));
@@ -2646,8 +2682,9 @@ mod tests {
         let tp = d.els.iter().position(|e| matches!(e, El::Code(Code::TblDef { .. }))).unwrap();
         let tb = crate::tables::parse(&d.els, tp).unwrap();
         assert_eq!(tb.cols, vec![2400, 2400]);
-        assert_eq!(tb.rows.iter().map(|r| r.len()).collect::<Vec<_>>(), vec![1, 2]);
-        assert_eq!(crate::rtf::tests::table_text(&d.els), "breit/a|b");
+        assert_eq!(tb.rows.iter().map(|r| r.len()).collect::<Vec<_>>(), vec![2, 2]);
+        assert_eq!(tb.slots(&d.els)[0], vec![crate::tables::Slot::Anchor { cols: 2, rows: 1 }, crate::tables::Slot::Covered { r: 0, c: 0 }]);
+        assert_eq!(crate::rtf::tests::table_text(&d.els), "breit|/a|b");
         balanced(&d.els);
     }
 

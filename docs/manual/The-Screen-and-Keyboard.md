@@ -13,7 +13,7 @@ C:\Users\...\Letter.docx                             Doc 1 Pg 1 Ln 1" Pos 1"
 | Part | Meaning |
 |---|---|
 | left side | The file name of the document (can be switched off in Setup, Display, 7). Messages and prompts also appear here. |
-| **Doc 1** / **Doc 2** | Which of the two documents you are working in. |
+| **Doc 1** … **Doc 9** | Which document you are working in. |
 | **Pg** | The page the cursor is on. |
 | **Ln** | The distance of the cursor line from the top of the page. |
 | **Pos** | The distance of the cursor from the left edge of the paper. The number is shown in the colour or style of the text attributes at the cursor (for example bold), as in 5.1. |
@@ -32,9 +32,11 @@ The left side of the status line also shows these words while they apply:
 
 The units of Ln and Pos (inches, centimetres, points…) are set in **Shift-F1**, **3**, **8** Units of Measure.
 
-### Two documents
+### Several documents
 
-You can have two documents open at the same time, **Doc 1** and **Doc 2**. **Shift-F3** (Switch) changes between them. Doc 2 has its own screen colour (white on cyan with the standard colours), so you always know where you are.
+You can have two documents open at the same time, **Doc 1** and **Doc 2**, and **Shift-F3** (Switch) changes between them, as in 5.1. Doc 2 has its own screen colour (white on cyan with the standard colours), so you always know where you are.
+
+If two are not enough, there are nine (as in WordPerfect 5.1 for Unix): **Home**, then **1** to **9**, goes to that document, and **Home**, **Shift-F3** lists them all. Shift-F3 always switches between the document you are in and the one you were in before. Documents with even numbers use the Doc 2 colour.
 
 To see both at the same time, press **Ctrl-F3**, **1** Window and type the number of lines for the top window (for example 11). Each document then gets half of the screen. To go back to one full window, use Ctrl-F3, 1 again and type 0 (or a number as large as the screen). With the mouse, click into the other window to switch to it.
 

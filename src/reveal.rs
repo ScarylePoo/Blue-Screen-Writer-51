@@ -95,6 +95,7 @@ pub fn code_text(c: &Code) -> String {
             format!("[Tbl Def:I;{},{}]", cols.len(), ws.join(","))
         }
         Code::Row => "[Row]".into(),
+        Code::Join { cols, rows } => format!("[Join:{cols}x{rows}]"),
         Code::Cell => "[Cell]".into(),
         Code::TblOff => "[Tbl Off]".into(),
         Code::ColDef { kind, cols } => crate::columns::reveal_text(*kind, cols),

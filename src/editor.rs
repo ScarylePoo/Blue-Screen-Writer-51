@@ -62,6 +62,8 @@ pub struct Editor {
     /// the fingerprint last written there.
     pub unsaved_file: Option<PathBuf>,
     pub unsaved_fp: Option<u64>,
+    /// Where the next typed character continues the current undo step.
+    typed_at: Option<usize>,
 }
 
 impl Editor {
@@ -92,6 +94,7 @@ impl Editor {
             save_warned: false,
             unsaved_file: None,
             unsaved_fp: None,
+            typed_at: None,
         }
     }
 
@@ -191,6 +194,15 @@ impl Editor {
         if self.reveal {
             return;
         }
+        self.skip_invisible();
+        // never inside a cell hidden under a joined cell
+        if let Some(p) = crate::tables::leave_covered(&self.doc.els, self.cursor, None) {
+            self.cursor = p;
+            self.skip_invisible();
+        }
+    }
+
+    fn skip_invisible(&mut self) {
         while self.cursor < self.doc.els.len()
             && is_invisible(&self.doc.els[self.cursor])
             && !matches!(self.doc.els[self.cursor], El::Code(Code::Cell | Code::Row | Code::TblOff | Code::TblDef { .. }))
@@ -224,15 +236,22 @@ impl Editor {
             return;
         }
         // step back over invisible codes then one visible element
+        // (crossing into the previous table cell is a step of its own:
+        // the cursor rests at the end of that cell)
         let mut c = self.cursor;
+        let mut crossed = false;
         while c > 0 && is_invisible(&self.doc.els[c - 1]) {
+            crossed |= matches!(self.doc.els[c - 1], El::Code(Code::Cell | Code::Row | Code::TblOff | Code::TblDef { .. }));
             c -= 1;
         }
-        if c > 0 {
+        if c > 0 && !crossed {
             c -= 1;
         }
         // rest after the codes that precede that element
         self.cursor = c;
+        if let Some(p) = crate::tables::leave_covered(&self.doc.els, self.cursor, Some(false)) {
+            self.cursor = p;
+        }
         self.settle();
     }
 
@@ -245,6 +264,17 @@ impl Editor {
         self.settle();
         if self.cursor < self.doc.els.len() {
             self.cursor += 1;
+            // [Tbl Def][Row][Cell] and [Row][Cell] are one step: there is
+            // no place for the cursor between them
+            while self.cursor < self.doc.els.len()
+                && matches!(self.doc.els[self.cursor - 1], El::Code(Code::Row | Code::TblDef { .. }))
+                && matches!(self.doc.els[self.cursor], El::Code(Code::Row | Code::Cell))
+            {
+                self.cursor += 1;
+            }
+            if let Some(p) = crate::tables::leave_covered(&self.doc.els, self.cursor, Some(true)) {
+                self.cursor = p;
+            }
         }
         self.settle();
     }
@@ -485,10 +515,13 @@ impl Editor {
 
     fn snapshot_coalesce(&mut self, e: &El) {
         // one undo step per word for typing
+        // (a word typed somewhere else, e.g. in the next table cell, is a
+        // step of its own)
         let boundary = !matches!(e, El::Ch(c) if !c.is_whitespace());
-        if boundary || self.undo.is_empty() {
+        if boundary || self.undo.is_empty() || self.typed_at != Some(self.cursor) {
             self.snapshot();
         }
+        self.typed_at = Some(self.cursor + 1);
     }
 
     pub fn insert_char(&mut self, c: char) {
@@ -530,12 +563,38 @@ impl Editor {
             return vec![];
         }
         self.snapshot();
-        let removed: Vec<El> = self.doc.els.drain(from..to).collect();
-        if self.cursor > to {
-            self.cursor -= to - from;
-        } else if self.cursor > from {
-            self.cursor = from;
-        }
+        // A table that lies only partly in the range keeps its structure
+        // ([Row], [Cell] …): only the text in its cells goes.
+        let removed: Vec<El> = match crate::tables::protected_in(&self.doc.els, from, to) {
+            None => {
+                let removed: Vec<El> = self.doc.els.drain(from..to).collect();
+                if self.cursor > to {
+                    self.cursor -= to - from;
+                } else if self.cursor > from {
+                    self.cursor = from;
+                }
+                removed
+            }
+            Some(keep) => {
+                let tail = self.doc.els.split_off(to);
+                let mid = self.doc.els.split_off(from);
+                let mut removed = Vec::new();
+                let mut gone_before_cursor = 0;
+                for (k, el) in mid.into_iter().enumerate() {
+                    if keep[k] {
+                        self.doc.els.push(el);
+                    } else {
+                        if from + k < self.cursor {
+                            gone_before_cursor += 1;
+                        }
+                        removed.push(el);
+                    }
+                }
+                self.doc.els.extend(tail);
+                self.cursor -= gone_before_cursor;
+                removed
+            }
+        };
         // If an attribute was turned on/off inside the removed part, the
         // partner code must go too — WP deletes code pairs together.
         self.drop_orphan_partners(&removed, from);
@@ -764,14 +823,18 @@ impl Editor {
 
     pub fn block_els(&self) -> Option<Vec<El>> {
         let (s, e) = self.block_range()?;
-        Some(self.doc.els[s..e].to_vec())
+        Some(crate::tables::copy_range(&self.doc.els, s, e))
     }
 
     pub fn delete_block(&mut self) -> Option<Vec<El>> {
         let (s, e) = self.block_range()?;
+        // what a Move takes along (cells of a partly blocked table as
+        // tabbed text)
+        let taken = self.block_els();
         self.block_anchor = None;
         self.cursor = s;
-        Some(self.delete_range(s, e, true))
+        self.delete_range(s, e, true);
+        taken
     }
 
     pub fn undelete_restore(&mut self, which: usize) {

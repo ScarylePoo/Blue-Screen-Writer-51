@@ -285,6 +285,10 @@ pub enum Code {
     Row,
     /// `[Cell]` — start of a table cell.
     Cell,
+    /// `[Join:2x1]` — directly after a `[Cell]`: this cell is joined with
+    /// its neighbours and covers `cols` columns and `rows` rows (Table
+    /// Edit, 7 Join).  The covered cells stay in the stream, empty.
+    Join { cols: u8, rows: u8 },
     /// `[Tbl Off]` — end of the table.
     TblOff,
     /// `[Col Def:Newspaper;2;1",4";4.5",7.5"]` — text column definition
@@ -650,9 +654,16 @@ impl Document {
     /// Plain text of a range (codes → nothing / \n / \t).
     pub fn plain_text(&self, from: usize, to: usize) -> String {
         let mut s = String::new();
-        for e in &self.els[from.min(self.els.len())..to.min(self.els.len())] {
+        let from = from.min(self.els.len());
+        for (k, e) in self.els[from..to.min(self.els.len())].iter().enumerate() {
+            // tables: a tab between cells, a new line for every row
+            let after_start = k > 0 && matches!(self.els[from + k - 1], El::Code(Code::Row | Code::TblDef { .. }));
             match e {
                 El::Ch(c) => s.push(*c),
+                El::Code(Code::Cell) if !after_start && k > 0 => s.push('\t'),
+                El::Code(Code::Row) if !after_start && k > 0 => s.push('\n'),
+                El::Code(Code::TblDef { .. }) if !s.is_empty() && !s.ends_with('\n') => s.push('\n'),
+                El::Code(Code::TblOff) => s.push('\n'),
                 El::Code(Code::HRt) => s.push('\n'),
                 El::Code(Code::HPg) => s.push('\u{c}'),
                 El::Code(Code::Tab | Code::Indent | Code::DblIndent) => s.push('\t'),

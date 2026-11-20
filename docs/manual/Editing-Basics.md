@@ -1,6 +1,6 @@
 # Editing Basics
 
-This page covers everyday typing and editing: moving around, deleting, Undo, Block, Move and Copy, Search and Replace, and working with two documents.
+This page covers everyday typing and editing: moving around, deleting, Undo, Block, Move and Copy, Search and Replace, and working with several documents.
 
 Keys are given for the standard **Alternate keyboard** (Esc = Cancel, F1 = Help, F3 = Repeat). See [The Screen and Keyboard](The-Screen-and-Keyboard) if you use the original keyboard.
 
@@ -216,10 +216,13 @@ With confirmation, the cursor stops at each match and asks `Confirm? No (Yes)`: 
 
 Replace works from the cursor to the end of the document; to replace everywhere, go to the beginning first (**Home**, **Home**, **Up**). Codes are entered with their keys, as for Search. Leaving the replacement empty deletes every occurrence. **Ctrl-Z** undoes a replace.
 
-## Two documents (Shift-F3) and split screen (Ctrl-F3)
+## Several documents (Shift-F3) and split screen (Ctrl-F3)
 
-- **Shift-F3** switches between **Doc 1** and **Doc 2**. Each has its own file, cursor, Undo history and Reveal Codes setting.
-- **Ctrl-F3**, **1 Window**: type the number of lines for the current window to see both documents one above the other. Type 0 to go back to one full window.
+- **Shift-F3** switches between **Doc 1** and **Doc 2**, as in 5.1. Each document has its own file, cursor, Undo history and Reveal Codes setting.
+- Up to **nine documents** can be open at once (as in WordPerfect 5.1 for Unix): press **Home**, then a number **1** to **9**, to go to that document. Shift-F3 then switches between that document and the one you came from.
+- **Home**, **Shift-F3** shows the list of all nine documents with their file names; type a number, or move the cursor and press Enter.
+- **F7** on a document leaves only that document; the program ends when you leave the last one in use.
+- **Ctrl-F3**, **1 Window**: type the number of lines for the current window to see two documents (the current one and the one Shift-F3 goes to) one above the other. Type 0 to go back to one full window.
 - **Ctrl-F3**, **3 Rewrite** (or pressing Ctrl-F3 twice) redraws the screen.
 
 ## Line Draw (Ctrl-F3, 2)

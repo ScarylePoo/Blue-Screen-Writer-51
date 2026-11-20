@@ -819,6 +819,52 @@ fn body_xml(doc: &Document, els_in: &[El], parts: &mut Parts) -> String {
     body
 }
 
+/// After reading a table: turn the "continues the cell above" marks
+/// (0×0 [Join]) into the row count of the joined cell they belong to.
+fn fix_vmerge(els: &mut Vec<El>, def: usize) {
+    let Some(t) = crate::tables::parse(els, def) else { return };
+    let mark = |els: &[El], r: usize, c: usize| -> Option<(usize, u8, u8)> {
+        let i = *t.rows.get(r)?.get(c)? + 1;
+        match els.get(i) {
+            Some(El::Code(Code::Join { cols, rows })) => Some((i, *cols, *rows)),
+            _ => None,
+        }
+    };
+    let mut remove: Vec<usize> = vec![];
+    for c in 0..t.cols.len().max(t.rows.iter().map(|r| r.len()).max().unwrap_or(0)) {
+        let mut anchor: Option<usize> = None; // element index of the open join
+        for r in 0..t.rows.len() {
+            match mark(els, r, c) {
+                Some((i, 0, 0)) => {
+                    remove.push(i);
+                    if let Some(a) = anchor {
+                        if let El::Code(Code::Join { rows, .. }) = &mut els[a] {
+                            *rows = rows.saturating_add(1);
+                        }
+                    }
+                }
+                Some((i, _, _)) => anchor = Some(i),
+                None => anchor = None,
+            }
+        }
+    }
+    // marks, and joins of a single cell, go
+    for r in 0..t.rows.len() {
+        for c in 0..t.rows[r].len() {
+            if let Some((i, cols, rows)) = mark(els, r, c) {
+                if (cols, rows) != (0, 0) && cols as usize * rows as usize <= 1 {
+                    remove.push(i);
+                }
+            }
+        }
+    }
+    remove.sort_unstable();
+    remove.dedup();
+    for i in remove.into_iter().rev() {
+        els.remove(i);
+    }
+}
+
 fn table_xml(doc: &Document, els: &[El], t: &crate::tables::Table, parts: &mut Parts) -> String {
     let mut x = String::from(
         "<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders><w:top w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:left w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:bottom w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:right w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/></w:tblBorders><w:tblLayout w:type=\"fixed\"/><w:tblCellMar><w:left w:w=\"115\" w:type=\"dxa\"/><w:right w:w=\"115\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>",
@@ -827,12 +873,34 @@ fn table_xml(doc: &Document, els: &[El], t: &crate::tables::Table, parts: &mut P
         x.push_str(&format!("<w:gridCol w:w=\"{}\"/>", twips(*w)));
     }
     x.push_str("</w:tblGrid>");
+    // joined cells: w:gridSpan across, w:vMerge down; the cells they
+    // cover are left out (across) or written as empty continuations (down)
+    use crate::tables::Slot;
+    let slots = t.slots(els);
     for (r, row) in t.rows.iter().enumerate() {
         x.push_str("<w:tr>");
         for (c, _) in row.iter().enumerate() {
             let (a, b) = t.cell_range(els, r, c);
-            let w = t.cols.get(c).copied().unwrap_or(1200);
-            x.push_str(&format!("<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/></w:tcPr>", twips(w)));
+            let (span, merge) = match slots[r][c] {
+                Slot::Normal => (1, ""),
+                Slot::Anchor { cols, rows } => (cols, if rows > 1 { "<w:vMerge w:val=\"restart\"/>" } else { "" }),
+                Slot::Covered { r: ar, c: ac } => {
+                    if ar == r || ac != c {
+                        continue;
+                    }
+                    match slots[ar][ac] {
+                        Slot::Anchor { cols, .. } => (cols, "<w:vMerge/>"),
+                        _ => (1, "<w:vMerge/>"),
+                    }
+                }
+            };
+            let w: i32 = (c..(c + span).min(t.cols.len().max(c + 1))).map(|k| t.cols.get(k).copied().unwrap_or(1200)).sum();
+            let grid = if span > 1 { format!("<w:gridSpan w:val=\"{span}\"/>") } else { String::new() };
+            x.push_str(&format!("<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/>{grid}{merge}</w:tcPr>", twips(w)));
+            if merge == "<w:vMerge/>" {
+                x.push_str("<w:p/></w:tc>");
+                continue;
+            }
             let inner = body_xml(doc, &els[a..b], parts);
             x.push_str(if inner.is_empty() { "<w:p/>" } else { &inner });
             x.push_str("</w:tc>");
@@ -1503,6 +1571,9 @@ pub fn parse_document_xml_full(
     let mut para_keep = false;
     let mut depth_tbl = 0;
     let mut cell_count = 0;
+    // A cell merged across columns (w:gridSpan) is followed by empty cells,
+    // so the cells after it stay in their own columns.
+    let mut span_pad: usize = 0;
     let mut sect_seen = false;
     // sections with <w:cols> → [Col Def][Col On] … [Col Off]
     let mut sect = SectCols::default();
@@ -1903,8 +1974,35 @@ pub fn parse_document_xml_full(
                             }
                         }
                     }
+                    b"gridSpan" if depth_tbl == 1 => {
+                        let n = get_attr(e, b"val").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).clamp(1, 64);
+                        span_pad = n - 1;
+                        if n > 1 && matches!(d.els.last(), Some(El::Code(Code::Cell))) {
+                            d.els.push(El::Code(Code::Join { cols: n as u8, rows: 1 }));
+                        }
+                    }
+                    // joined down: "restart" starts it; the cells below
+                    // continue it (marked with a 0×0 [Join] until the table
+                    // is complete, see `fix_vmerge`)
+                    b"vMerge" if depth_tbl == 1 => {
+                        let restart = get_attr(e, b"val").as_deref() == Some("restart");
+                        let has = matches!(d.els.last(), Some(El::Code(Code::Join { .. })));
+                        if restart {
+                            if !has {
+                                d.els.push(El::Code(Code::Join { cols: 1, rows: 1 }));
+                            }
+                        } else {
+                            if has {
+                                d.els.pop();
+                            }
+                            d.els.push(El::Code(Code::Join { cols: 0, rows: 0 }));
+                        }
+                    }
                     b"tc" => {
                         if depth_tbl == 1 {
+                            for _ in 0..std::mem::take(&mut span_pad) {
+                                d.els.push(El::Code(Code::Cell));
+                            }
                             d.els.push(El::Code(Code::Cell));
                             first_para = true;
                         } else {
@@ -1917,6 +2015,9 @@ pub fn parse_document_xml_full(
                     b"tr" => {
                         cell_count = 0;
                         if depth_tbl == 1 {
+                            for _ in 0..std::mem::take(&mut span_pad) {
+                                d.els.push(El::Code(Code::Cell));
+                            }
                             d.els.push(El::Code(Code::Row));
                         }
                     }
@@ -1986,7 +2087,13 @@ pub fn parse_document_xml_full(
                 }
                 b"tbl" => {
                     if depth_tbl == 1 {
+                        for _ in 0..std::mem::take(&mut span_pad) {
+                            d.els.push(El::Code(Code::Cell));
+                        }
                         d.els.push(El::Code(Code::TblOff));
+                        if let Some(at) = tbl_def_at {
+                            fix_vmerge(&mut d.els, at);
+                        }
                         // fill in missing grid widths
                         if let Some(at) = tbl_def_at.take() {
                             let ncols = crate::tables::parse(&d.els, at).map(|t| t.rows.iter().map(|r| r.len()).max().unwrap_or(1)).unwrap_or(1);
@@ -2142,6 +2249,40 @@ mod tests {
         assert_eq!(tb.rows.len(), 2);
         assert_eq!(tb.cols.len(), 2);
         assert_eq!(d2.plain_text(0, d2.len()).replace('\n', "|"), d.plain_text(0, d.len()).replace('\n', "|"));
+    }
+
+    #[test]
+    fn joined_cells_via_xml() {
+        // 3×3: A1 joined across B1; A2 joined down to A3; B2:C3 a 2×2 block
+        let mut d = Document::new();
+        let mut els = vec![El::Code(Code::TblDef { cols: vec![2000, 2000, 2000] })];
+        for r in 0..3 {
+            els.push(El::Code(Code::Row));
+            for c in 0..3 {
+                els.push(El::Code(Code::Cell));
+                match (r, c) {
+                    (0, 0) => els.push(El::Code(Code::Join { cols: 2, rows: 1 })),
+                    (1, 0) => els.push(El::Code(Code::Join { cols: 1, rows: 2 })),
+                    (1, 1) => els.push(El::Code(Code::Join { cols: 2, rows: 2 })),
+                    _ => {}
+                }
+                let covered = matches!((r, c), (0, 1) | (2, 0) | (1, 2) | (2, 1) | (2, 2));
+                if !covered {
+                    els.extend(format!("z{r}{c}").chars().map(El::Ch));
+                }
+            }
+        }
+        els.push(El::Code(Code::TblOff));
+        d.els = els;
+        let xml = document_xml(&d, &mut Parts::default());
+        assert_eq!(xml.matches("<w:gridSpan w:val=\"2\"/>").count(), 3, "{xml}");
+        assert_eq!(xml.matches("<w:vMerge w:val=\"restart\"/>").count(), 2, "{xml}");
+        assert_eq!(xml.matches("<w:vMerge/>").count(), 2, "{xml}");
+        let d2 = via_xml(&d);
+        let t = crate::tables::parse(&d.els, 0).unwrap();
+        let t2 = crate::tables::parse(&d2.els, d2.els.iter().position(|e| matches!(e, El::Code(Code::TblDef { .. }))).unwrap()).unwrap();
+        assert_eq!(t2.slots(&d2.els), t.slots(&d.els), "{:?}", d2.els);
+        assert_eq!(d2.plain_text(0, d2.len()), d.plain_text(0, d.len()));
     }
 
     /// Write, then read back through document.xml only (no private stream).

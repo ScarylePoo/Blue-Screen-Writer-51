@@ -1226,7 +1226,8 @@ impl MacroVm {
     /// {STATE}
     fn state(&self, wp: &Wp) -> i64 {
         let e = wp.ed_ref();
-        let mut s = (wp.cur as i64 + 1) | 32;
+        // (5.1 knows documents 1-3 here; Doc 4-9 report as 3)
+        let mut s = (wp.cur as i64 + 1).min(3) | 32;
         match top_kind(wp) {
             None => s |= 4,
             Some(ScreenKind::SubEdit) => s |= 4 | 8,

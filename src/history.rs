@@ -869,6 +869,27 @@ mod safety_tests {
     }
 
     #[test]
+    fn markdown_files_autosave_and_warn_about_lost_formatting() {
+        let dir = cfg().join(format!("md-{}", new_doc_id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("Notes.md");
+        std::fs::write(&p, "# Title\n\n- one\n- two\n").unwrap();
+        let mut wp = Wp::new(80, 25);
+        wp.retrieve(&p);
+        wp.input(Input::Char('X'));
+        force_autosave(&mut wp);
+        assert!(!wp.ed_ref().modified, "{:?}", wp.message);
+        let text = std::fs::read_to_string(&p).unwrap();
+        assert!(text.contains("# ") && text.contains("- one") && text.contains('X'), "{text}");
+        // plain Markdown content: no note; with a margin change: a note
+        wp.do_save(&p);
+        assert!(wp.message.is_none(), "{:?}", wp.message);
+        wp.ed().insert_code(Code::LRMargin { left: 2400, right: 2400 });
+        wp.do_save(&p);
+        assert!(wp.message.as_deref().unwrap_or("").contains("Markdown keeps"), "{:?}", wp.message);
+    }
+
+    #[test]
     fn footnote_editor_leaves_no_stray_recovery_copy() {
         cfg();
         let mut wp = Wp::new(80, 25);

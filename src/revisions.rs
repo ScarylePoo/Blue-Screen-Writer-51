@@ -73,17 +73,16 @@ impl Screen for Revisions {
             Input::Char('2') | Input::Char('r') | Input::Char('R') => {
                 // open the old version in the other document (Doc 2 / Doc 1)
                 if let Some(mut d) = history::load_revision(&self.list[self.sel].file) {
-                    let other = 1 - wp.cur;
-                    if !wp.docs[other].is_empty() && wp.docs[other].modified {
-                        wp.flash("ERROR: The other document has unsaved changes");
+                    // the first document that is not in use
+                    let Some(other) = (0..wp.docs.len()).find(|&k| k != wp.cur && !wp.doc_in_use(k)) else {
+                        wp.flash("ERROR: All documents are in use — exit one first (F7)");
                         return Outcome::Keep;
-                    }
+                    };
                     d.id = crate::doc::new_doc_id(); // a copy, with its own history
                     let mut ed = crate::editor::Editor::with_doc(d, None);
                     ed.settle();
                     wp.docs[other] = ed;
-                    wp.cur = other;
-                    wp.apply_doc_theme();
+                    wp.switch_to(other);
                     wp.flash("Old version opened as a new document — Shift-F3 switches back");
                     return Outcome::CloseAll;
                 }

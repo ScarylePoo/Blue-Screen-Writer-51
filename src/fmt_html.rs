@@ -371,6 +371,12 @@ struct TableCtx {
     rows: usize,
     in_cell: bool,
     span_extra: usize,
+    /// column of the next cell in the current row
+    col: usize,
+    /// cells joined down (rowspan): (column, columns, rows still to come)
+    down: Vec<(usize, usize, usize)>,
+    /// the same, begun in the current row
+    down_new: Vec<(usize, usize, usize)>,
     widths: Vec<i32>,
     col_widths: Vec<i32>,
     width_ok: bool,
@@ -577,9 +583,28 @@ impl Conv {
         }
     }
 
-    fn flush_spans(&mut self) {
+    /// Empty cells for the columns the previous cell spans, and for those
+    /// hidden under a cell joined down from a row above (HTML leaves these
+    /// out).  `row_end`: the row is complete, the next one begins.
+    fn flush_spans(&mut self, row_end: bool) {
         if let Some(t) = self.tables.last_mut() {
-            let n = std::mem::take(&mut t.span_extra);
+            let mut n = std::mem::take(&mut t.span_extra);
+            t.col += n;
+            loop {
+                let here = t.down.iter().find(|d| d.0 == t.col).map(|d| d.1);
+                let next = here.or_else(|| if row_end { t.down.iter().filter(|d| d.0 > t.col).map(|d| d.0 + d.1 - t.col).min() } else { None });
+                let Some(k) = next else { break };
+                n += k;
+                t.col += k;
+            }
+            if row_end {
+                t.col = 0;
+                for d in t.down.iter_mut() {
+                    d.2 -= 1;
+                }
+                t.down.retain(|d| d.2 > 0);
+                t.down.append(&mut t.down_new);
+            }
             for _ in 0..n {
                 self.b.cell();
             }
@@ -587,7 +612,7 @@ impl Conv {
     }
 
     fn end_table(&mut self) {
-        self.flush_spans();
+        self.flush_spans(true);
         let Some(t) = self.tables.pop() else { return };
         if let Some(at) = t.def_at {
             let widths = if !t.col_widths.is_empty() { t.col_widths } else if t.width_ok { t.widths } else { vec![] };
@@ -790,10 +815,10 @@ impl Conv {
                 let before = self.b.els.len();
                 self.b.table_start(vec![]);
                 let def_at = (self.b.els.len() > before && matches!(self.b.els.last(), Some(El::Code(Code::TblDef { .. })))).then(|| self.b.els.len() - 1);
-                self.tables.push(TableCtx { def_at, rows: 0, in_cell: false, span_extra: 0, widths: vec![], col_widths: vec![], width_ok: true });
+                self.tables.push(TableCtx { def_at, rows: 0, in_cell: false, span_extra: 0, col: 0, down: vec![], down_new: vec![], widths: vec![], col_widths: vec![], width_ok: true });
             }
             "tr" if !skipping && !self.tables.is_empty() => {
-                self.flush_spans();
+                self.flush_spans(true);
                 self.b.row();
                 if let Some(t) = self.tables.last_mut() {
                     t.rows += 1;
@@ -801,7 +826,7 @@ impl Conv {
                 }
             }
             "td" | "th" if !skipping && !self.tables.is_empty() => {
-                self.flush_spans();
+                self.flush_spans(false);
                 if self.tables.last().is_some_and(|t| t.rows == 0) {
                     self.b.row();
                     if let Some(t) = self.tables.last_mut() {
@@ -810,10 +835,16 @@ impl Conv {
                 }
                 self.b.cell();
                 let span: usize = attr(attrs, "colspan").and_then(|s| s.trim().parse().ok()).unwrap_or(1).clamp(1, 64);
+                let down: usize = attr(attrs, "rowspan").and_then(|s| s.trim().parse().ok()).unwrap_or(1).clamp(1, 255);
+                self.b.join(span, down);
                 let w = attr(attrs, "width").or(sty("width")).and_then(|w| length_wpu(w, 7800));
                 if let Some(t) = self.tables.last_mut() {
                     t.in_cell = true;
                     t.span_extra = span - 1;
+                    if down > 1 {
+                        t.down_new.push((t.col, span, down - 1));
+                    }
+                    t.col += 1;
                     if t.rows == 1 {
                         match w {
                             Some(w) if span == 1 => t.widths.push(w),
@@ -1087,6 +1118,24 @@ mod tests {
         assert_eq!(d.els[at], El::Code(Code::TblDef { cols: vec![1250, 2500] }));
         let t = crate::tables::parse(&d.els, at).unwrap();
         assert_eq!(t.rows.len(), 2);
+    }
+
+    #[test]
+    fn joined_cells_roundtrip() {
+        let d = crate::rtf::tests::joined_doc();
+        let h = crate::export::to_html(&d);
+        assert_eq!(h.matches("<td").count(), 4, "{h}");
+        assert_eq!(h.matches(" colspan=\"2\"").count(), 2, "{h}");
+        assert_eq!(h.matches(" rowspan=\"2\"").count(), 2, "{h}");
+        let d2 = rd(&h);
+        crate::rtf::tests::same_joins(&d, &d2);
+        // a cell joined down in the middle and at the end of a row
+        let d3 = rd("<table><tr><td>a<td rowspan=3>b<td>c<td rowspan=2>d<tr><td>e<td>f<tr><td>g<td>h<td>i</table>");
+        assert_eq!(debug_text(&d3.els), "[Tbl]\n[Row]|a|b|c|d\n[Row]|e||f|\n[Row]|g||h|i[TblOff]");
+        use crate::tables::Slot;
+        let t = crate::tables::parse(&d3.els, 0).unwrap();
+        assert_eq!(t.slots(&d3.els)[2], vec![Slot::Normal, Slot::Covered { r: 0, c: 1 }, Slot::Normal, Slot::Normal]);
+        assert_eq!(t.slots(&d3.els)[1][3], Slot::Covered { r: 0, c: 3 });
     }
 
     #[test]

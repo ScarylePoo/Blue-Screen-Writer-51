@@ -433,18 +433,27 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
         use crate::layout::{BORDER_H, BorderKind, VRow};
         let mut prev_border: Option<(usize, usize)> = None; // (vrow, table)
         for (v, vr) in layout.vrows.iter().enumerate() {
-            if let VRow::Border { table, kind } = vr {
-                let xs = &layout.tables[*table].x;
+            if let VRow::Border { table, kind, row } = vr {
+                let geom = &layout.tables[*table];
+                let xs = &geom.x;
                 let pg = layout.vrow_page.get(v).copied().unwrap_or(1) as usize;
                 let y = layout.vrow_y.get(v).copied().unwrap_or(0) + BORDER_H / 2;
                 let outer = *kind != BorderKind::Mid;
                 if let Some(p) = pages.get_mut(pg - 1) {
                     let th = if outer { 12 } else { 6 };
-                    p.rules.push((xs[0], y, xs[xs.len() - 1] - xs[0] + th, th));
+                    // (no rule inside a joined cell)
+                    for c in 0..xs.len() - 1 {
+                        if outer || geom.rule_h(*row - 1, c) {
+                            p.rules.push((xs[c], y, xs[c + 1] - xs[c] + th, th));
+                        }
+                    }
                     if let Some((pv, pt)) = prev_border {
                         if pt == *table && layout.vrow_page.get(pv) == layout.vrow_page.get(v) {
                             let y0 = layout.vrow_y[pv] + BORDER_H / 2;
                             for (k, x) in xs.iter().enumerate() {
+                                if !geom.rule_v(*row - 1, k) {
+                                    continue;
+                                }
                                 let th = if k == 0 || k == xs.len() - 1 { 12 } else { 6 };
                                 p.rules.push((*x, y0, th, y - y0));
                             }

@@ -116,6 +116,16 @@ Shift-F10 and F5 open almost any word-processor file. The program recognises the
 
 Password-protected Word documents ask for the password. See below.
 
+## Markdown documents (.md)
+
+A Markdown file opens as a normal document and is saved back as Markdown:
+
+- **Headings** (`#` to `######`) appear bold in six sizes; **lists** appear with bullets (•), numbers or check boxes (☐ ☒), nested by tabs; **block quotes** are indented; **code** is in Courier New; **links** keep their address (shown as `[Link:…]` in Reveal Codes); **tables** keep their column alignment; **footnotes** are real footnotes.
+- A picture stays as the Markdown text `![description](file)`; it is not shown as a picture.
+- Saving writes the file in one consistent Markdown style. The content stays the same, but the source text may look different from how it was typed by hand (bullets, spacing, line breaks).
+- Markdown has no place for fonts, margins, tab settings, columns, headers and footers, pictures or joined table cells. When you save a document with such formatting as `.md`, the status line says so; keep a `.docx` copy if you need the formatting.
+- Like Word documents, named `.md` files are saved automatically every few minutes.
+
 ## Ctrl-F5 Text In/Out
 
 Press **Ctrl-F5**:

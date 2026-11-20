@@ -262,8 +262,11 @@ impl Theme {
 }
 
 pub struct Wp {
-    pub docs: [Editor; 2],
+    /// Doc 1 … Doc 9 (as in 5.1 for Unix; 5.1 for DOS had two).
+    pub docs: Vec<Editor>,
     pub cur: usize,
+    /// The document Shift-F3 Switch goes back to (never `cur`).
+    pub prev: usize,
     pub(crate) screens: Vec<Box<dyn Screen>>,
     pub message: Option<String>,
     pub quit: bool,
@@ -306,6 +309,20 @@ pub struct Wp {
     pub screen_size: Option<(usize, usize)>,
 }
 
+/// Does the document have formatting a Markdown file can't hold (fonts,
+/// margins, tab settings, columns, headers and footers, pictures, joined
+/// cells …)?
+fn markdown_loses(doc: &Document) -> bool {
+    let typewriter = |f: &FontSpec| f.name.to_lowercase().contains("courier");
+    doc.els.iter().chain(doc.initial_codes.iter()).any(|e| match e {
+        El::Code(Code::Font(f)) => !typewriter(f),
+        El::Code(
+            Code::LRMargin { .. } | Code::LineSpacing(_) | Code::TabSet(_) | Code::Center | Code::FlushRight | Code::ColDef { .. } | Code::HeadFoot { .. } | Code::GBox(_) | Code::Join { .. },
+        ) => true,
+        _ => false,
+    })
+}
+
 /// Start another program window that takes over one recovery copy.
 fn open_recovery_window(file: &Path) -> bool {
     if cfg!(test) {
@@ -319,14 +336,45 @@ fn open_recovery_window(file: &Path) -> bool {
     c.arg("--recover").arg(file).spawn().is_ok()
 }
 
+/// Number of documents that can be open in one window.
+pub const NDOCS: usize = 9;
+
 impl Wp {
+    /// Is document `k` in use (has text or a name)?
+    pub fn doc_in_use(&self, k: usize) -> bool {
+        !self.docs[k].is_empty() || self.docs[k].path.is_some()
+    }
+
+    /// Make document `k` the current one (Shift-F3, Home 1-9, the list).
+    pub fn switch_to(&mut self, k: usize) {
+        if k >= self.docs.len() || k == self.cur {
+            return;
+        }
+        let r = self.ed_ref().reveal;
+        self.prev = self.cur;
+        self.cur = k;
+        self.docs[k].reveal = r;
+        self.apply_doc_theme();
+        self.after_edit();
+    }
+
+    /// The two documents of the split screen (Ctrl-F3, 1 Window): the
+    /// current one and the one Switch goes to, lower number on top.
+    pub fn pair(&self) -> (usize, usize) {
+        (self.cur.min(self.prev), self.cur.max(self.prev))
+    }
+
     pub fn new(cols: usize, rows: usize) -> Wp {
         Wp {
-            docs: [Editor::new(), Editor::new()].map(|mut e| {
-                e.doc.id = new_doc_id();
-                e
-            }),
+            docs: (0..NDOCS)
+                .map(|_| {
+                    let mut e = Editor::new();
+                    e.doc.id = new_doc_id();
+                    e
+                })
+                .collect(),
             cur: 0,
+            prev: 1,
             screens: Vec::new(),
             message: None,
             quit: false,
@@ -372,13 +420,13 @@ impl Wp {
             let q = format!("Recover {name} (autosaved {d} {t})?");
             self.push(YesNo::new(&q, true, move |wp, yes| {
                 if yes {
-                    // into an empty document (Doc 1 or Doc 2); if both are
-                    // in use, into a new program window of its own
+                    // into an empty document (Doc 1 … 9); if all are in
+                    // use, into a new program window of its own
                     if !wp.docs.iter().any(|d| d.is_empty() && d.path.is_none()) {
                         if !crate::links::HEADLESS.load(std::sync::atomic::Ordering::Relaxed) && open_recovery_window(&r.file) {
                             return None; // the new window takes the copy over
                         }
-                        wp.flash("Both documents are in use — this copy is offered again at the next start");
+                        wp.flash("All documents are in use — this copy is offered again at the next start");
                         return None;
                     }
                     wp.take_recovered(r.doc.clone(), r.path.clone());
@@ -394,7 +442,10 @@ impl Wp {
 
     /// Put a recovered document into the first empty document.
     pub fn take_recovered(&mut self, doc: Document, path: Option<PathBuf>) {
-        let slot = (0..2).find(|&k| self.docs[k].is_empty() && self.docs[k].path.is_none()).unwrap_or(0);
+        let slot = (0..self.docs.len()).find(|&k| !self.doc_in_use(k)).unwrap_or(0);
+        if slot != self.cur {
+            self.prev = self.cur;
+        }
         let mut ed = Editor::with_doc(doc, path.clone());
         ed.modified = true;
         ed.settle();
@@ -573,6 +624,11 @@ impl Wp {
                             self.ed().insert_code(Code::HardHyphen);
                             return;
                         }
+                        // Home, 1-9: go to that document
+                        '1'..='9' if self.ed_ref().block_anchor.is_none() => {
+                            self.switch_to(c as usize - '1' as usize);
+                            return;
+                        }
                         '/' => {
                             // [/] cancel hyphenation of the next word
                             self.ed().insert_code(Code::Fmt(crate::fmt::Fmt::CancelHyph));
@@ -617,17 +673,18 @@ impl Wp {
         match (self.settings.colors.as_str(), k) {
             ("wp", _) => Theme::wp_blue(),
             ("mono", _) => Theme::mono(),
-            (_, 1) => Theme::hers_doc2(),
+            (_, k) if k % 2 == 1 => Theme::hers_doc2(),
             _ => Theme::hers(),
         }
     }
 
-    /// Doc 1 and Doc 2 have their own screen colours (her setup).
+    /// Doc 1 and Doc 2 have their own screen colours (her setup); the
+    /// further documents alternate between the two.
     pub fn apply_doc_theme(&mut self) {
         self.theme = match (self.settings.colors.as_str(), self.cur) {
             ("wp", _) => Theme::wp_blue(),
             ("mono", _) => Theme::mono(),
-            (_, 1) => Theme::hers_doc2(),
+            (_, k) if k % 2 == 1 => Theme::hers_doc2(),
             _ => Theme::hers(),
         };
     }
@@ -656,7 +713,7 @@ impl Wp {
             return self.rows.saturating_sub(3 + top + self.reveal_window_rows());
         }
         match self.split {
-            Some(n) if self.cur == 0 => n,
+            Some(n) if self.cur == self.pair().0 => n,
             Some(n) => self.rows.saturating_sub(n + 2 + top),
             None => self.rows - 1 - top,
         }
@@ -680,11 +737,12 @@ impl Wp {
     pub fn set_window(&mut self, lines: usize) {
         let full = self.rows - 1;
         self.split = if lines == 0 || lines >= full - 2 { None } else { Some(lines.max(2)) };
-        if self.split.is_some() && self.cur == 1 {
+        if self.split.is_some() && self.cur == self.pair().1 {
             // the number refers to the current (lower) window
             self.split = Some(full.saturating_sub(lines + 1).max(2));
         }
-        for k in 0..2 {
+        let (a, b) = self.pair();
+        for k in [a, b] {
             let cur = self.cur;
             self.cur = k;
             self.after_edit();
@@ -718,7 +776,7 @@ impl Wp {
         if self.timers.last_recovery.elapsed() >= crate::history::RECOVERY_EVERY {
             self.timers.last_recovery = std::time::Instant::now();
             let mut failed = None;
-            for k in 0..2 {
+            for k in 0..self.docs.len() {
                 if sub && k == self.cur {
                     continue;
                 }
@@ -752,7 +810,7 @@ impl Wp {
         if am > 0 && self.timers.last_autosave.elapsed() >= std::time::Duration::from_secs(am as u64 * 60) {
             self.timers.last_autosave = std::time::Instant::now();
             let quiet = !self.screens.is_empty();
-            for k in 0..2 {
+            for k in 0..self.docs.len() {
                 if sub && k == self.cur {
                     continue;
                 }
@@ -764,7 +822,8 @@ impl Wp {
                     self.autosave_unnamed(k);
                     continue;
                 };
-                let is_docx = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("docx"));
+                // Word and Markdown files are autosaved to their own file
+                let is_docx = p.extension().is_some_and(|x| ["docx", "md", "markdown"].iter().any(|k| x.eq_ignore_ascii_case(k)));
                 if !is_docx {
                     // .txt, .doc, .wpd …: keep the text, don't touch the file
                     crate::history::record(&self.docs[k].doc, Some(&p), "unsaved");
@@ -1164,11 +1223,11 @@ impl Wp {
                         wp.ed().block_case(k == 0);
                         None
                     }));
+                } else if home > 0 {
+                    // Home, Shift-F3: the list of documents
+                    crate::doclist::open(self);
                 } else {
-                    let r = self.ed_ref().reveal;
-                    self.cur = 1 - self.cur;
-                    self.docs[self.cur].reveal = r;
-                    self.apply_doc_theme();
+                    self.switch_to(self.prev);
                 }
             }
             Move => self.move_menu(),
@@ -1490,6 +1549,11 @@ impl Wp {
                 e.save_warned = false;
                 self.timers.last_autosave = std::time::Instant::now();
                 self.message = None;
+                // Markdown has no place for most formatting
+                let is_md = p.extension().is_some_and(|x| x.eq_ignore_ascii_case("md") || x.eq_ignore_ascii_case("markdown"));
+                if is_md && markdown_loses(&self.docs[cur].doc) {
+                    self.flash("Note: Markdown keeps text, headings, lists, links and tables — other formatting is not saved");
+                }
             }
             Err(e) => self.flash(&format!("ERROR: Can't save file — {e}")),
         }
@@ -1512,8 +1576,8 @@ impl Wp {
     }
 
     fn exit_question(&mut self) -> Next {
-        let other = 1 - self.cur;
-        let q = if self.docs[other].is_empty() && self.docs[other].path.is_none() {
+        let others = (0..self.docs.len()).any(|k| k != self.cur && self.doc_in_use(k));
+        let q = if !others {
             "Exit Blue Screen Writer 51?".to_string()
         } else {
             format!("Exit doc {}?", self.cur + 1)
@@ -1533,13 +1597,19 @@ impl Wp {
                 wp.autosave_unnamed(cur);
             }
             if yes {
-                let other = 1 - wp.cur;
-                if wp.docs[other].is_empty() && wp.docs[other].path.is_none() {
-                    wp.quit = true;
-                } else {
-                    wp.docs[wp.cur] = wp.fresh_editor();
-                    wp.cur = other;
-                    wp.apply_doc_theme();
+                // on to the document Switch would go to, or the next one
+                // that is in use; none left = leave the program
+                let next = Some(wp.prev).filter(|&k| wp.doc_in_use(k)).or_else(|| (0..wp.docs.len()).find(|&k| k != wp.cur && wp.doc_in_use(k)));
+                match next {
+                    None => wp.quit = true,
+                    Some(k) => {
+                        let old = wp.cur;
+                        wp.docs[old] = wp.fresh_editor();
+                        wp.switch_to(k);
+                        // Switch then goes to another document in use,
+                        // or back to the one just emptied
+                        wp.prev = (0..wp.docs.len()).find(|&j| j != k && wp.doc_in_use(j)).unwrap_or(old);
+                    }
                 }
             } else {
                 wp.docs[wp.cur] = wp.fresh_editor();
@@ -1584,10 +1654,10 @@ impl Wp {
                     self.flash("Note: changed by another program since last saved here — revision kept");
                 }
                 if self.ed_ref().is_empty() && self.ed_ref().path.is_none() {
-                    let other = 1 - self.cur;
+                    let twice = (0..self.docs.len()).find(|&k| k != self.cur && self.docs[k].path.as_deref().is_some_and(|o| crate::history::same_path(o, p)));
                     if crate::history::open_elsewhere(p) {
                         self.flash("WARNING: This file is also open in another Blue Screen Writer window");
-                    } else if self.docs[other].path.as_deref().is_some_and(|o| crate::history::same_path(o, p)) {
+                    } else if let Some(other) = twice {
                         self.flash(&format!("WARNING: This file is also open as Doc {}", other + 1));
                     }
                     let reveal = self.ed_ref().reveal;
@@ -2102,12 +2172,12 @@ impl Wp {
                 // split screen: a click in the other window switches to it
                 let mut row = row;
                 if let Some(n) = self.split.filter(|_| !self.ed_ref().reveal) {
-                    let k = if row < n { 0 } else if row > n { 1 } else { self.cur };
+                    let (upper, lower) = self.pair();
+                    let k = if row < n { upper } else if row > n { lower } else { self.cur };
                     if k != self.cur && kind == MouseKind::Down {
-                        self.cur = k;
-                        self.apply_doc_theme();
+                        self.switch_to(k);
                     }
-                    if self.cur == 1 {
+                    if self.cur == lower {
                         row = row.saturating_sub(n + 1);
                     }
                 }
@@ -2208,10 +2278,11 @@ impl Wp {
             // split screen: Doc 1 on top, a ruler, Doc 2 below
             let (t0, h0) = (top, n);
             let (t1, h1) = (top + n + 1, self.rows.saturating_sub(n + 2 + top));
-            let c0 = self.draw_doc(g, 0, t0, h0, self.cur == 0);
-            let c1 = self.draw_doc(g, 1, t1, h1, self.cur == 1);
-            self.draw_ruler_for(g, top + n, 0);
-            g.cursor = if self.cur == 0 { c0 } else { c1 };
+            let (upper, lower) = self.pair();
+            let c0 = self.draw_doc(g, upper, t0, h0, self.cur == upper);
+            let c1 = self.draw_doc(g, lower, t1, h1, self.cur == lower);
+            self.draw_ruler_for(g, top + n, upper);
+            g.cursor = if self.cur == upper { c0 } else { c1 };
             self.draw_status(g, self.rows - 1);
             return;
         }
@@ -2254,20 +2325,55 @@ impl Wp {
                 }
                 crate::layout::DRow::Comment { el, row: r } => crate::comments::draw_row(g, &e.doc, el, r as usize, row, left, th.normal),
                 crate::layout::DRow::V(v) => match &lay.vrows[v] {
-                    crate::layout::VRow::Border { table, kind } => {
-                        let xs = &lay.tables[*table].x;
+                    crate::layout::VRow::Border { table, kind, row: trow } => {
+                        use crate::layout::BorderKind;
+                        let geom = &lay.tables[*table];
+                        let xs = &geom.x;
                         let (l0, h, mid, r0) = border_chars(*kind);
-                        let c0 = xs[0] / COL_WPU - left;
-                        let c1 = xs[xs.len() - 1] / COL_WPU - left;
-                        for c in c0..=c1 {
-                            if c >= 0 && (c as usize) < g.cols {
-                                g.put(c as usize, row, h, th.normal);
+                        let last = xs.len() - 1;
+                        // is there a rule: above / below boundary k, and
+                        // under column c of the row above (joined cells
+                        // have no rules inside)
+                        let up = |k: usize| *kind != BorderKind::Top && geom.rule_v(*trow - 1, k);
+                        let down = |k: usize| *kind != BorderKind::Bottom && geom.rule_v(*trow, k);
+                        let seg = |c: usize| *kind != BorderKind::Mid || geom.rule_h(*trow - 1, c);
+                        for c in 0..last {
+                            let ch = if seg(c) { h } else { ' ' };
+                            for col in xs[c] / COL_WPU - left..=xs[c + 1] / COL_WPU - left {
+                                if col >= 0 && (col as usize) < g.cols {
+                                    g.put(col as usize, row, ch, th.normal);
+                                }
                             }
                         }
                         for (k, x) in xs.iter().enumerate() {
                             let c = x / COL_WPU - left;
                             if c >= 0 && (c as usize) < g.cols {
-                                let ch = if k == 0 { l0 } else if k == xs.len() - 1 { r0 } else { mid };
+                                let ch = if k == 0 {
+                                    if seg(0) { l0 } else { '║' }
+                                } else if k == last {
+                                    if seg(last - 1) { r0 } else { '║' }
+                                } else {
+                                    match *kind {
+                                        BorderKind::Top => if down(k) { mid } else { h },
+                                        BorderKind::Bottom => if up(k) { mid } else { h },
+                                        BorderKind::Mid => match (up(k), down(k), seg(k - 1), seg(k)) {
+                                            (true, true, true, true) => '┼',
+                                            (true, true, false, false) => '│',
+                                            (false, false, true, true) => '─',
+                                            (true, false, true, true) => '┴',
+                                            (false, true, true, true) => '┬',
+                                            (true, true, false, true) => '├',
+                                            (true, true, true, false) => '┤',
+                                            (true, false, false, true) => '└',
+                                            (true, false, true, false) => '┘',
+                                            (false, true, false, true) => '┌',
+                                            (false, true, true, false) => '┐',
+                                            (false, false, true, false) | (false, false, false, true) => '─',
+                                            (true, false, false, false) | (false, true, false, false) => '│',
+                                            (false, false, false, false) => ' ',
+                                        },
+                                    }
+                                };
                                 g.put(c as usize, row, ch, th.normal);
                             }
                         }
@@ -2279,14 +2385,17 @@ impl Wp {
                             let t = lay.lines[li].start;
                             let _ = t;
                             lay.vrows[..v].iter().rev().find_map(|vr| match vr {
-                                crate::layout::VRow::Border { table, kind } if *kind != crate::layout::BorderKind::Bottom => Some(*table),
-                                crate::layout::VRow::Border { .. } => Some(usize::MAX),
+                                crate::layout::VRow::Border { table, kind, row } if *kind != crate::layout::BorderKind::Bottom => Some((*table, *row)),
+                                crate::layout::VRow::Border { .. } => Some((usize::MAX, 0)),
                                 _ => None,
                             })
                         });
-                        if let Some(t) = tbl.filter(|t| *t != usize::MAX) {
+                        if let Some((t, trow)) = tbl.filter(|t| t.0 != usize::MAX) {
                             let xs = &lay.tables[t].x;
                             for (k, x) in xs.iter().enumerate() {
+                                if !lay.tables[t].rule_v(trow, k) {
+                                    continue;
+                                }
                                 let c = x / COL_WPU - left;
                                 if c >= 0 && (c as usize) < g.cols {
                                     let ch = if k == 0 || k == xs.len() - 1 { '║' } else { '│' };

@@ -206,9 +206,11 @@ You never need the mouse. But if you want it:
 
 The classic Ctrl-F4 Move/Copy still works inside the program.
 
-### Two documents
+### Two documents, or up to nine
 
 **Shift-F3** switches between Doc 1 and Doc 2, as before. Doc 2 has its own screen colour, so you always know where you are.
+
+New: if two are not enough, there are nine. Press **Home**, then a number **1** to **9**, to go to that document; **Home**, **Shift-F3** shows a list of all of them. Shift-F3 keeps switching between the document you are in and the one you were in before.
 
 **Ctrl-F3, 1 Window** shows both at once, one above the other.
 

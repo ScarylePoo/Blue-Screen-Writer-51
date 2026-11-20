@@ -276,17 +276,36 @@ impl<'a> Rtf<'a> {
 
     fn table(&mut self, els: &[El], t: &crate::tables::Table) {
         let tw = |w: i32| w as i64 * 1440 / 1200;
+        use crate::tables::Slot;
+        let slots = t.slots(els);
         for r in 0..t.rows.len() {
             let mut x = 0;
             let mut row = String::from("\\trowd\\trgaph108");
             for (c, _) in t.rows[r].iter().enumerate() {
                 x += t.cols.get(c).copied().unwrap_or(1200);
+                // joined cells: first / further cell across (\clmgf, \clmrg)
+                // and down (\clvmgf, \clvmrg); the covered cells stay, empty
+                let (ar, ac, cols, rows) = match slots[r][c] {
+                    Slot::Normal => (r, c, 1, 1),
+                    Slot::Anchor { cols, rows } => (r, c, cols, rows),
+                    Slot::Covered { r: ar, c: ac } => match slots[ar][ac] {
+                        Slot::Anchor { cols, rows } => (ar, ac, cols, rows),
+                        _ => (r, c, 1, 1),
+                    },
+                };
+                if rows > 1 {
+                    row.push_str(if r == ar { "\\clvmgf" } else { "\\clvmrg" });
+                }
+                if cols > 1 {
+                    row.push_str(if c == ac { "\\clmgf" } else { "\\clmrg" });
+                }
                 row.push_str(&format!("\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx{}", tw(x)));
             }
             self.out.push_str(&row);
             self.out.push('\n');
             for c in 0..t.rows[r].len() {
                 let (a, b) = t.cell_range(els, r, c);
+                let a = if matches!(els.get(a), Some(El::Code(Code::Join { .. }))) { a + 1 } else { a };
                 self.els(&els[a..b], true);
                 if a == b {
                     self.para_start(els, a, true);
@@ -540,14 +559,29 @@ impl<'a> Html<'a> {
                 if let El::Code(Code::TblDef { .. }) = els[i] {
                     if let Some(t) = crate::tables::parse(els, i) {
                         out.push_str("<table style=\"border-collapse:collapse\">\n");
+                        use crate::tables::Slot;
+                        let slots = t.slots(els);
                         for r in 0..t.rows.len() {
                             out.push_str("<tr>");
                             for c in 0..t.rows[r].len() {
                                 let (a, b) = t.cell_range(els, r, c);
-                                let w = t.cols.get(c).copied().unwrap_or(1200) as f64 / 1200.0 * 96.0;
+                                // joined cells: colspan / rowspan, the covered cells are left out
+                                let (cols, rows) = match slots[r][c] {
+                                    Slot::Normal => (1, 1),
+                                    Slot::Anchor { cols, rows } => (cols, rows),
+                                    Slot::Covered { .. } => continue,
+                                };
+                                let w = (c..c + cols).map(|k| t.cols.get(k).copied().unwrap_or(1200)).sum::<i32>() as f64 / 1200.0 * 96.0;
+                                let mut span = String::new();
+                                if cols > 1 {
+                                    span.push_str(&format!(" colspan=\"{cols}\""));
+                                }
+                                if rows > 1 {
+                                    span.push_str(&format!(" rowspan=\"{rows}\""));
+                                }
                                 let mut j2 = *just;
                                 let inner = self.els(&els[a..b], st, &mut j2, true);
-                                out.push_str(&format!("<td style=\"border:1px solid #000;padding:2px 6px;vertical-align:top;width:{}px\">{inner}</td>", w.round()));
+                                out.push_str(&format!("<td{span} style=\"border:1px solid #000;padding:2px 6px;vertical-align:top;width:{}px\">{inner}</td>", w.round()));
                             }
                             out.push_str("</tr>\n");
                         }

@@ -270,6 +270,14 @@ impl Builder {
         self.para_has_content = false;
     }
 
+    /// The cell just started is joined over `cols` × `rows` cells (the
+    /// caller adds the empty cells it covers).
+    pub fn join(&mut self, cols: usize, rows: usize) {
+        if self.tbl_depth == 1 && cols * rows > 1 && matches!(self.els.last(), Some(El::Code(Code::Cell))) {
+            self.els.push(El::Code(Code::Join { cols: cols.min(255) as u8, rows: rows.min(255) as u8 }));
+        }
+    }
+
     pub fn table_end(&mut self) {
         if self.tbl_depth == 0 {
             return;

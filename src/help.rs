@@ -344,8 +344,10 @@ fn key_help(f: Func) -> (&'static str, &'static [&'static str]) {
         Switch => (
             "Switch",
             &[
-                "Changes between Doc 1 and Doc 2 - two documents can be open at",
-                "the same time.",
+                "Changes between the document you are in and the one you were in",
+                "before - normally Doc 1 and Doc 2.  Up to nine documents can be",
+                "open at the same time: Home, then 1-9 goes to that document, and",
+                "Home, Shift-F3 lists them all.",
                 "",
                 "With Block on: 1 Uppercase; 2 Lowercase converts the blocked text.",
             ],

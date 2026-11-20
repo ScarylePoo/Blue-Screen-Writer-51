@@ -46,7 +46,7 @@ Recover C:\Users\...\Letter.docx (autosaved 11-12-26 02:32p)? Yes (No)
 
 Before anything is asked, every recovery copy is also stored in the revision history ("Crash recovery copy"), so whatever you answer, the text can still be found with Ctrl-F5, 6.
 
-If Doc 1 and Doc 2 are both already in use (for example after a crash with several program windows open), each further copy you accept opens in a new program window of its own.
+If all nine documents are already in use, each further copy you accept opens in a new program window of its own.
 
 Recovery copies are kept in `%APPDATA%\Blue Screen Writer 51\Recovery`, in one folder per open program window. A normal save, or leaving a document with "don't save", removes its recovery copy. Only copies of windows that are no longer running are offered: if you start the program a second time (for example by double-clicking a document while it is already open), the second window does not offer the first window's copies.
 
@@ -54,7 +54,7 @@ If no recovery copy can be written (for example because the disk is full), the s
 
 ## Two windows, one file
 
-If you open a file that is already open in another Blue Screen Writer 51 window, or in the other document (Doc 1/Doc 2), the status line warns you. Saving in both places would overwrite one set of changes with the other, so close one of them.
+If you open a file that is already open in another Blue Screen Writer 51 window, or in another document of the same window (Doc 1 to Doc 9), the status line warns you. Saving in both places would overwrite one set of changes with the other, so close one of them.
 
 ## Automatic saving
 
@@ -75,7 +75,7 @@ Automatic saving never overwrites a newer file. If the file on disk was saved by
 
 ## Timed backup
 
-In addition (as in WordPerfect 5.1), changed documents are copied to the **backup folder** every **10 minutes**, as `BSW51.BK1.docx` (Doc 1) and `BSW51.BK2.docx` (Doc 2). These files are overwritten each time.
+In addition (as in WordPerfect 5.1), changed documents are copied to the **backup folder** every **10 minutes**, as `BSW51.BK1.docx` (Doc 1), `BSW51.BK2.docx` (Doc 2) and so on. These files are overwritten each time.
 
 Settings in **Shift-F1**, **3**, **1** Backup Options:
 
@@ -133,7 +133,7 @@ The **Kind** column tells you how the version came about:
 Move with the **arrow keys** or **Page Up/Down**, or click with the mouse. Then choose:
 
 1. **Look** (or **Enter**, or a double-click) — shows the text of that version, read only. Any key except the arrow and page keys returns to the list.
-2. **Retrieve as new document** — opens that version in the **other** document window (Doc 2 if you are in Doc 1), as a new, unnamed document. Use it to copy a paragraph back. **Shift-F3** switches between the two. If the other document has unsaved changes, you get an error message instead; save or clear it first.
+2. **Retrieve as new document** — opens that version in the first document that is not in use (normally Doc 2), as a new, unnamed document. Use it to copy a paragraph back. **Shift-F3** switches between the two. If all nine documents are in use, you get an error message instead; leave one with F7 first.
 3. **Compare with current** — marks in your current text what changed since that version: added text as tracked insertions, removed text as tracked deletions. Accept or reject the differences with **Alt-F5**, **7** (see [Track Changes and Comments](Track-Changes-and-Comments)), or undo the marking with **Ctrl-Z**.
 4. **Restore** — asks `Replace the current text with this version? No (Yes)`. **Y** puts that version on the screen in place of your current text. Nothing is lost: all newer versions stay in the list, and **Ctrl-Z** brings back the text you had before. The text you had is also kept in the list as "Text before a restore". Save afterwards to keep the restored version.
 

@@ -46,9 +46,16 @@ Ctrl-Arrows Column Widths; Ins Insert; Del Delete; Move Copy;
 | **1 Size** | Set the total number of rows or columns. Rows and columns are added or removed at the end of the table. |
 | **2 Format** | Justification of 1 Cell or 2 Column: Left, Center, Right or Full. |
 | **5 Math** | Table formulas (see below). |
+| **Alt-F4** (Block) | Start marking cells for Join: move to the last cell with the arrow keys. Esc switches Block off. |
+| **7 Join** | Joins the blocked cells into one cell (across, down, or both). Answer **Y** to `Join cells? No (Yes)`. The text of all the cells is collected in the first one. |
+| **8 Split** | With the cursor in a joined cell: separates it into single cells again. The text stays in the first cell. |
 | **F7**, **Esc**, **Alt-F7** | Leave Table Edit. |
 
-*Not available in this version:* 3 Lines, 4 Header, 6 Options, 7 Join, 8 Split, and Move/Copy inside Table Edit. Tables imported from Word or WordPerfect files keep their own lines and joined cells when saved.
+A joined cell shows `[Join:2x1]` (columns x rows) in Reveal Codes. The cursor, Tab and the arrow keys skip the cells that are hidden under it. Joined cells are kept in Word files in both directions, so tables with merged cells from Word look the same here, and tables joined here look the same in Word.
+
+All editing in a table can be undone with **Ctrl-Z**, one cell or one Table Edit step at a time. A Block that covers only part of a table deletes or copies the text of the cells, not the table's structure; block the whole table (from before it to after it) to delete or move the table itself.
+
+*Not available in this version:* 3 Lines, 4 Header, 6 Options, and Move/Copy inside Table Edit. Every table is shown with a full grid of lines. A table inside a table cell (from a Word file) is shown as text.
 
 ### Table math
 

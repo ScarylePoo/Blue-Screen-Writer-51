@@ -227,7 +227,18 @@ pub(crate) struct TableState {
     pub def_at: usize,
     pub need_row: bool,
     pub pending_cell: bool,
+    /// rows finished so far in the open table
+    pub rows_done: usize,
+    /// per row, per cell: `MRG_*` flags of joined cells (RTF only)
+    pub merge: Vec<Vec<u8>>,
 }
+
+/// `\clmgf`, `\clmrg`, `\clvmgf`, `\clvmrg`: first / further cell of a
+/// range joined across, first / further cell of a range joined down.
+pub(crate) const MRG_HF: u8 = 1;
+pub(crate) const MRG_H: u8 = 2;
+pub(crate) const MRG_VF: u8 = 4;
+pub(crate) const MRG_V: u8 = 8;
 
 impl TableState {
     /// Make sure a table is open (when `intbl`) or closed (when not), and
@@ -242,6 +253,8 @@ impl TableState {
             self.in_tbl = true;
             self.need_row = true;
             self.pending_cell = false;
+            self.rows_done = 0;
+            self.merge.clear();
         } else if !intbl && self.in_tbl {
             self.close(els, text_width);
         }
@@ -273,6 +286,7 @@ impl TableState {
         }
         self.pending_cell = false;
         self.need_row = true;
+        self.rows_done += 1;
         if let Some(El::Code(Code::TblDef { cols: c })) = els.get_mut(self.def_at) {
             if c.len() < cols.len() {
                 *c = cols.to_vec();
@@ -295,6 +309,56 @@ impl TableState {
                 let w = (text_width / ncols as i32).max(300);
                 cols.resize(ncols, w);
             }
+        }
+        self.joins(els);
+    }
+
+    /// The merge flags of the row that is about to end (before `row_end`).
+    pub fn row_merge(&mut self, flags: &[u8]) {
+        if self.in_tbl && flags.iter().any(|f| *f != 0) {
+            self.merge.resize(self.rows_done + 1, vec![]);
+            self.merge[self.rows_done] = flags.to_vec();
+        }
+    }
+
+    /// Turn the collected merge flags into `[Join]` codes (the covered
+    /// cells are already there as empty cells).
+    fn joins(&mut self, els: &mut Vec<El>) {
+        let merge = std::mem::take(&mut self.merge);
+        if merge.is_empty() {
+            return;
+        }
+        let Some(t) = crate::tables::parse(els, self.def_at) else { return };
+        let flag = |r: usize, c: usize| if c < t.rows.get(r).map_or(0, |x| x.len()) { merge.get(r).and_then(|m| m.get(c)).copied().unwrap_or(0) } else { 0 };
+        let mut used: Vec<Vec<bool>> = t.rows.iter().map(|r| vec![false; r.len()]).collect();
+        let mut ins: Vec<(usize, u8, u8)> = vec![];
+        for r in 0..t.rows.len() {
+            for c in 0..t.rows[r].len() {
+                let f = flag(r, c);
+                if used[r][c] || f & (MRG_HF | MRG_VF) == 0 || f & MRG_H != 0 || (f & MRG_V != 0 && f & MRG_VF == 0) {
+                    continue;
+                }
+                let mut cols = 1;
+                while f & MRG_HF != 0 && cols < 255 && flag(r, c + cols) & MRG_H != 0 && !used[r][c + cols] {
+                    cols += 1;
+                }
+                let mut rows = 1;
+                while f & MRG_VF != 0 && rows < 255 && flag(r + rows, c) & MRG_V != 0 && !used[r + rows][c] {
+                    rows += 1;
+                }
+                if cols * rows <= 1 {
+                    continue;
+                }
+                for row in used.iter_mut().skip(r).take(rows) {
+                    for u in row.iter_mut().skip(c).take(cols) {
+                        *u = true;
+                    }
+                }
+                ins.push((t.rows[r][c] + 1, cols as u8, rows as u8));
+            }
+        }
+        for (at, cols, rows) in ins.into_iter().rev() {
+            els.insert(at, El::Code(Code::Join { cols, rows }));
         }
     }
 }
@@ -337,6 +401,9 @@ struct Parser<'a> {
     last_sect_hpg: Option<usize>,
     star: bool,
     cellx: Vec<i32>,
+    /// merge flags (`MRG_*`) of the cells in `cellx`, and of the next one
+    cellmrg: Vec<u8>,
+    mrg: u8,
     trleft: i32,
     rev_authors: Vec<String>,
     rev_name: String,
@@ -414,7 +481,9 @@ impl<'a> Parser<'a> {
         }
         if !t.para_started {
             t.para_started = true;
-            if !intbl && just != t.just {
+            // (also inside tables: the next cell's paragraph switches back)
+            let _ = intbl;
+            if just != t.just {
                 t.els.push(El::Code(Code::Just(just)));
                 t.just = just;
             }
@@ -783,13 +852,21 @@ impl<'a> Parser<'a> {
             "tab" => self.emit_code(Code::Tab, true),
             "trowd" => {
                 self.cellx.clear();
+                self.cellmrg.clear();
+                self.mrg = 0;
                 self.trleft = 0;
             }
+            "clmgf" => self.mrg |= MRG_HF,
+            "clmrg" => self.mrg |= MRG_H,
+            "clvmgf" => self.mrg |= MRG_VF,
+            "clvmrg" => self.mrg |= MRG_V,
             "trleft" => self.trleft = p.unwrap_or(0),
             "cellx" => {
                 if self.cellx.len() < 64 {
                     self.cellx.push(p.unwrap_or(0));
+                    self.cellmrg.push(self.mrg);
                 }
+                self.mrg = 0;
             }
             "cell" => {
                 if self.st.dest == Dest::Text {
@@ -806,7 +883,9 @@ impl<'a> Parser<'a> {
             "row" => {
                 if self.st.dest == Dest::Text {
                     let cols = widths_from_bounds(&self.cellx, self.trleft);
+                    let mrg = self.cellmrg.clone();
                     let t = self.target();
+                    t.tbl.row_merge(&mrg);
                     t.tbl.row_end(&mut t.els, &cols);
                     t.para_started = false;
                 }
@@ -1007,6 +1086,8 @@ pub fn read(bytes: &[u8]) -> Result<Document, String> {
         last_sect_hpg: None,
         star: false,
         cellx: vec![],
+        cellmrg: vec![],
+        mrg: 0,
         trleft: 0,
         rev_authors: vec![],
         rev_name: String::new(),
@@ -1039,6 +1120,63 @@ pub(crate) mod tests {
 
     fn text(d: &Document) -> String {
         d.plain_text(0, d.len())
+    }
+
+    /// 3×3: A1 joined across B1; A2 joined down to A3; B2:C3 a 2×2 block.
+    pub(crate) fn joined_doc() -> Document {
+        let mut d = Document::new();
+        let mut els = vec![El::Code(Code::TblDef { cols: vec![2000, 2000, 2000] })];
+        for r in 0..3 {
+            els.push(El::Code(Code::Row));
+            for c in 0..3 {
+                els.push(El::Code(Code::Cell));
+                match (r, c) {
+                    (0, 0) => els.push(El::Code(Code::Join { cols: 2, rows: 1 })),
+                    (1, 0) => els.push(El::Code(Code::Join { cols: 1, rows: 2 })),
+                    (1, 1) => els.push(El::Code(Code::Join { cols: 2, rows: 2 })),
+                    _ => {}
+                }
+                if !matches!((r, c), (0, 1) | (2, 0) | (1, 2) | (2, 1) | (2, 2)) {
+                    els.extend(format!("z{r}{c}").chars().map(El::Ch));
+                }
+            }
+        }
+        els.push(El::Code(Code::TblOff));
+        d.els = els;
+        d
+    }
+
+    /// `b` (read back) has the same joined cells and text as `a`.
+    pub(crate) fn same_joins(a: &Document, b: &Document) {
+        let def = |d: &Document| d.els.iter().position(|e| matches!(e, El::Code(Code::TblDef { .. }))).unwrap();
+        let (ta, tb) = (crate::tables::parse(&a.els, def(a)).unwrap(), crate::tables::parse(&b.els, def(b)).unwrap());
+        assert_eq!(tb.slots(&b.els), ta.slots(&a.els), "{:?}", b.els);
+        assert!(ta.slots(&a.els).iter().flatten().any(|s| matches!(s, crate::tables::Slot::Anchor { .. })));
+        assert_eq!(b.els.iter().filter(|e| matches!(e, El::Code(Code::Join { .. }))).count(), a.els.iter().filter(|e| matches!(e, El::Code(Code::Join { .. }))).count());
+        assert_eq!(table_text(&b.els), table_text(&a.els));
+        assert_eq!(b.plain_text(0, b.len()).trim_end(), a.plain_text(0, a.len()).trim_end());
+    }
+
+    #[test]
+    fn joined_cells_roundtrip() {
+        let d = joined_doc();
+        let r = crate::export::to_rtf(&d);
+        assert_eq!(r.matches("\\clmgf").count(), 2 * 3, "{r}");
+        assert_eq!(r.matches("\\clvmgf").count(), 2 * 3, "{r}");
+        assert_eq!(r.matches("\\clvmrg").count(), 2 * 3, "{r}");
+        let d2 = read(r.as_bytes()).unwrap();
+        same_joins(&d, &d2);
+        // as Word writes it, and a table without any merge flags
+        let w = br"{\rtf1\trowd\clmgf\cellx1000\clmrg\cellx2000\clvmgf\cellx3000\pard\intbl a\cell\cell b\cell\row\trowd\cellx1000\cellx2000\clvmrg\cellx3000\pard\intbl c\cell d\cell\cell\row\pard x}";
+        let d3 = read(w).unwrap();
+        use crate::tables::Slot;
+        let t = crate::tables::parse(&d3.els, 0).unwrap();
+        assert_eq!(t.slots(&d3.els), vec![vec![Slot::Anchor { cols: 2, rows: 1 }, Slot::Covered { r: 0, c: 0 }, Slot::Anchor { cols: 1, rows: 2 }], vec![Slot::Normal, Slot::Normal, Slot::Covered { r: 0, c: 2 }]]);
+        assert_eq!(table_text(&d3.els), "a||b/c|d|");
+        let mut p = Document::new();
+        p.els = crate::tables::new_table(2, 2, 4800);
+        let plain = crate::export::to_rtf(&p);
+        assert!(!plain.contains("\\clm") && !plain.contains("\\clvm"), "{plain}");
     }
 
     /// "a|b/c|d" for the first table in `els`.

@@ -42,7 +42,9 @@ pub enum LineEnd {
 #[derive(Clone, Debug)]
 pub enum VRow {
     Lines(Vec<usize>),
-    Border { table: usize, kind: BorderKind },
+    /// `row`: the table row that follows this border (0 for the top
+    /// border, the number of rows for the bottom one).
+    Border { table: usize, kind: BorderKind, row: usize },
     /// An empty row of this height (WPU): text continues below a
     /// graphics box that leaves no room beside it.
     Gap(i32),
@@ -72,6 +74,59 @@ pub static COMMENTS_DISPLAY: std::sync::atomic::AtomicBool = std::sync::atomic::
 pub struct TableGeom {
     /// Column boundaries (WPU, absolute), ncols + 1 entries.
     pub x: Vec<i32>,
+    /// Per row, where the rules are (joined cells have none inside).
+    pub rows: Vec<RowGeom>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct RowGeom {
+    /// A vertical rule at column boundary k (ncols + 1 entries).
+    pub open: Vec<bool>,
+    /// A horizontal rule below column c of this row (ncols entries).
+    pub below: Vec<bool>,
+}
+
+impl TableGeom {
+    /// Vertical rule at boundary `k` beside row `r`?  (Rows the table
+    /// doesn't know have all rules.)
+    pub fn rule_v(&self, r: usize, k: usize) -> bool {
+        self.rows.get(r).and_then(|g| g.open.get(k).copied()).unwrap_or(true)
+    }
+    /// Horizontal rule below column `c` of row `r`?
+    pub fn rule_h(&self, r: usize, c: usize) -> bool {
+        self.rows.get(r).and_then(|g| g.below.get(c).copied()).unwrap_or(true)
+    }
+}
+
+/// Where the rules of the table starting at `def` are, and how many
+/// columns every cell covers (0 = hidden under a joined cell).
+fn table_rules(els: &[El], def: usize, ncols: usize) -> (Vec<RowGeom>, Vec<Vec<usize>>) {
+    use crate::tables::Slot;
+    let Some(t) = crate::tables::parse(els, def) else { return (vec![], vec![]) };
+    let slots = t.slots(els);
+    let owner = |r: usize, c: usize| match slots.get(r).and_then(|row| row.get(c)) {
+        Some(Slot::Covered { r, c }) => (*r, *c),
+        _ => (r, c),
+    };
+    let nrows = slots.len();
+    let mut geom = Vec::with_capacity(nrows);
+    let mut spans = Vec::with_capacity(nrows);
+    for r in 0..nrows {
+        let open = (0..=ncols).map(|k| k == 0 || k == ncols || owner(r, k - 1) != owner(r, k)).collect();
+        let below = (0..ncols).map(|c| r + 1 >= nrows || owner(r, c) != owner(r + 1, c)).collect();
+        geom.push(RowGeom { open, below });
+        spans.push(
+            slots[r]
+                .iter()
+                .map(|s| match s {
+                    Slot::Normal => 1,
+                    Slot::Anchor { cols, .. } => *cols,
+                    Slot::Covered { .. } => 0,
+                })
+                .collect(),
+        );
+    }
+    (geom, spans)
 }
 
 /// Inner padding of a table cell.
@@ -82,6 +137,10 @@ pub const BORDER_H: i32 = 60;
 struct TblState {
     id: usize,
     x: Vec<i32>,
+    /// rows finished so far (= index of the current row)
+    done: usize,
+    /// columns covered by every cell (0 = hidden under a joined cell)
+    spans: Vec<Vec<usize>>,
     col: Option<usize>,
     row_open: bool,
     row_base: usize,
@@ -506,7 +565,8 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
         if t.row_open {
             *next_vrow = t.row_base + t.row_max.max(1);
             ensure(vrows, *next_vrow);
-            vrows[*next_vrow] = VRow::Border { table: t.id, kind };
+            t.done += 1;
+            vrows[*next_vrow] = VRow::Border { table: t.id, kind, row: t.done };
             *next_vrow += 1;
             t.row_open = false;
         }
@@ -526,11 +586,12 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
                     for w in cols {
                         x.push(x.last().unwrap() + (*w).max(COL_WPU * 2));
                     }
-                    tables.push(TableGeom { x: x.clone() });
+                    let (rows, spans) = table_rules(els, pre_end, cols.len());
+                    tables.push(TableGeom { x: x.clone(), rows });
                     ensure(&mut vrows, next_vrow);
-                    vrows[next_vrow] = VRow::Border { table: tables.len() - 1, kind: BorderKind::Top };
+                    vrows[next_vrow] = VRow::Border { table: tables.len() - 1, kind: BorderKind::Top, row: 0 };
                     next_vrow += 1;
-                    tbl = Some(TblState { id: tables.len() - 1, x, col: None, row_open: false, row_base: next_vrow, row_max: 0, cell_lines: 0 });
+                    tbl = Some(TblState { id: tables.len() - 1, x, done: 0, spans, col: None, row_open: false, row_base: next_vrow, row_max: 0, cell_lines: 0 });
                 }
                 El::Code(Code::Row) => {
                     if let Some(t) = tbl.as_mut() {
@@ -593,7 +654,13 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
                 k += 1;
             }
         }
-        let in_cell = tbl.as_ref().and_then(|t| t.col.map(|c| (t.x[c], t.x[c + 1])));
+        // (a joined cell reaches over the columns it covers)
+        let in_cell = tbl.as_ref().and_then(|t| {
+            t.col.map(|c| {
+                let span = t.spans.get(t.done).and_then(|r| r.get(c)).copied().unwrap_or(1).max(1);
+                (t.x[c], t.x[(c + span).min(t.x.len() - 1)])
+            })
+        });
         if in_cell.is_some() {
             indent_left = None;
             indent_right = None;
