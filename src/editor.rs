@@ -267,8 +267,8 @@ impl Editor {
             // [Tbl Def][Row][Cell] and [Row][Cell] are one step: there is
             // no place for the cursor between them
             while self.cursor < self.doc.els.len()
-                && matches!(self.doc.els[self.cursor - 1], El::Code(Code::Row | Code::TblDef { .. }))
-                && matches!(self.doc.els[self.cursor], El::Code(Code::Row | Code::Cell))
+                && matches!(self.doc.els[self.cursor - 1], El::Code(Code::Row | Code::TblDef { .. } | Code::TblOpt(_)))
+                && matches!(self.doc.els[self.cursor], El::Code(Code::Row | Code::Cell | Code::TblOpt(_)))
             {
                 self.cursor += 1;
             }

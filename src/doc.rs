@@ -149,6 +149,86 @@ pub enum ColKind {
     ParallelProtect,
 }
 
+/// A table line (Table Edit, 3 Lines).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum LineStyle {
+    None,
+    #[default]
+    Single,
+    Double,
+    Dashed,
+    Dotted,
+    Thick,
+    ExtraThick,
+}
+
+impl LineStyle {
+    pub const ALL: [LineStyle; 7] = [LineStyle::None, LineStyle::Single, LineStyle::Double, LineStyle::Dashed, LineStyle::Dotted, LineStyle::Thick, LineStyle::ExtraThick];
+    pub fn name(self) -> &'static str {
+        ["None", "Single", "Double", "Dashed", "Dotted", "Thick", "Extra Thick"][self as usize]
+    }
+    pub fn from_index(n: usize) -> Option<LineStyle> {
+        Self::ALL.get(n).copied()
+    }
+}
+
+/// The lines and shading one table cell was given.  Sides: 0 left,
+/// 1 right, 2 top, 3 bottom; `None` = not set (the table's default line:
+/// double on the outside of the table, single inside).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct CellFmt {
+    pub lines: [Option<LineStyle>; 4],
+    pub shade: bool,
+}
+
+impl CellFmt {
+    pub const SIDES: [&'static str; 4] = ["Left", "Right", "Top", "Bottom"];
+    pub fn is_default(&self) -> bool {
+        *self == CellFmt::default()
+    }
+}
+
+/// Where a table stands between the margins (Table Options, 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TblPos {
+    #[default]
+    Left,
+    Right,
+    Center,
+    /// Columns stretched (or shrunk) in proportion to fill the margins.
+    Full,
+    /// Left edge of the table, WPU from the left edge of the paper.
+    Set(i32),
+}
+
+/// Table-wide settings (Table Edit: 4 Header, 6 Options).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TblOpt {
+    /// The first rows are repeated at the top of every page the table
+    /// continues on.
+    pub header_rows: u16,
+    /// Spacing between text and lines: left, right, top, bottom (WPU).
+    pub pad: [i32; 4],
+    /// Negative results of table math in parentheses instead of with a
+    /// minus sign.
+    pub neg_paren: bool,
+    pub pos: TblPos,
+    /// Darkness of shaded cells, % of black.
+    pub gray: u8,
+}
+
+impl Default for TblOpt {
+    fn default() -> Self {
+        TblOpt { header_rows: 0, pad: [120, 120, 0, 0], neg_paren: false, pos: TblPos::Left, gray: 10 }
+    }
+}
+
+impl TblOpt {
+    pub fn is_default(&self) -> bool {
+        *self == TblOpt::default()
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Justify {
     Left,
@@ -289,6 +369,14 @@ pub enum Code {
     /// its neighbours and covers `cols` columns and `rows` rows (Table
     /// Edit, 7 Join).  The covered cells stay in the stream, empty.
     Join { cols: u8, rows: u8 },
+    /// `[Tbl Opt:Hdr 1;Pos Center]` — directly after a `[Tbl Def]`: the
+    /// table-wide settings of Table Edit, 4 Header and 6 Options.  Only
+    /// there when something differs from the defaults.
+    TblOpt(TblOpt),
+    /// `[Cell Lines:Top Double;Shade On]` — after a `[Cell]` (behind its
+    /// `[Join]`, if any): the lines of this cell that were set in Table
+    /// Edit, 3 Lines, and its shading.  Only there when something is set.
+    CellFmt(CellFmt),
     /// `[Tbl Off]` — end of the table.
     TblOff,
     /// `[Col Def:Newspaper;2;1",4";4.5",7.5"]` — text column definition
@@ -657,7 +745,7 @@ impl Document {
         let from = from.min(self.els.len());
         for (k, e) in self.els[from..to.min(self.els.len())].iter().enumerate() {
             // tables: a tab between cells, a new line for every row
-            let after_start = k > 0 && matches!(self.els[from + k - 1], El::Code(Code::Row | Code::TblDef { .. }));
+            let after_start = k > 0 && matches!(self.els[from + k - 1], El::Code(Code::Row | Code::TblDef { .. } | Code::TblOpt(_)));
             match e {
                 El::Ch(c) => s.push(*c),
                 El::Code(Code::Cell) if !after_start && k > 0 => s.push('\t'),

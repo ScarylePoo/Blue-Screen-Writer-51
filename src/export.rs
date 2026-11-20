@@ -19,6 +19,8 @@ struct Rtf<'a> {
     spacing: u32,
     tabs: TabSet,
     rev: Option<(bool, usize)>,
+    /// grays of shaded table cells (% of black): colour table entries 2…
+    grays: Vec<u8>,
 }
 
 fn rtf_text(out: &mut String, s: &str) {
@@ -274,15 +276,62 @@ impl<'a> Rtf<'a> {
         }
     }
 
+    /// A table.  Without `[Tbl Opt]` / `[Cell Lines]` codes every cell
+    /// gets a plain `\brdrs` on its four sides.  Otherwise: the lines each
+    /// cell shows (`\clbrdr…` with style and width), shading as
+    /// `\clcbpat` (a gray added to the colour table), header rows as
+    /// `\trhdr`, the position as `\trqc` / `\trqr` / `\trleft` (Full: a
+    /// preferred width of 100 % and columns that fill the margins), the
+    /// spacing as `\trgaph` and `\trpadd…`.
     fn table(&mut self, els: &[El], t: &crate::tables::Table) {
         let tw = |w: i32| w as i64 * 1440 / 1200;
         use crate::tables::Slot;
         let slots = t.slots(els);
+        let opt = crate::tables::opt_at(els, t.def);
+        let look = crate::fmt_build::table_look(els, t);
+        let plain = look.is_plain();
+        let mut cols = t.cols.clone();
+        let mut pre = String::from("\\trowd");
+        if opt.pad == TblOpt::default().pad {
+            pre.push_str("\\trgaph108");
+        } else {
+            let [l, r, tp, b] = opt.pad;
+            pre.push_str(&format!("\\trgaph{}\\trpaddl{}\\trpaddr{}\\trpaddt{}\\trpaddb{}\\trpaddfl3\\trpaddfr3\\trpaddft3\\trpaddfb3", tw((l + r) / 2), tw(l), tw(r), tw(tp), tw(b)));
+        }
+        let mut left = 0;
+        match opt.pos {
+            TblPos::Left => {}
+            TblPos::Right => pre.push_str("\\trqr"),
+            TblPos::Center => pre.push_str("\\trqc"),
+            TblPos::Full => {
+                cols = crate::fmt_build::full_widths(&cols, self.doc.init.page_width - self.doc.init.left - self.doc.init.right);
+                pre.push_str("\\trftsWidth2\\trwWidth5000");
+            }
+            TblPos::Set(x) => {
+                left = x - self.doc.init.left;
+                pre.push_str(&format!("\\trleft{}", tw(left)));
+            }
+        }
+        // the gray of the shaded cells: an entry of the colour table
+        // (0 = auto, 1 = the red of redlined text, then the grays)
+        let shaded = look.cells.iter().flatten().any(|c| c.shade);
+        let fill = if shaded {
+            let k = self.grays.iter().position(|g| *g == opt.gray).unwrap_or_else(|| {
+                self.grays.push(opt.gray);
+                self.grays.len() - 1
+            });
+            k + 2
+        } else {
+            0
+        };
         for r in 0..t.rows.len() {
-            let mut x = 0;
-            let mut row = String::from("\\trowd\\trgaph108");
+            let mut x = left;
+            let mut row = pre.clone();
+            if r < opt.header_rows as usize {
+                row.push_str("\\trhdr");
+            }
             for (c, _) in t.rows[r].iter().enumerate() {
-                x += t.cols.get(c).copied().unwrap_or(1200);
+                x += cols.get(c).copied().unwrap_or(1200);
                 // joined cells: first / further cell across (\clmgf, \clmrg)
                 // and down (\clvmgf, \clvmrg); the covered cells stay, empty
                 let (ar, ac, cols, rows) = match slots[r][c] {
@@ -299,13 +348,26 @@ impl<'a> Rtf<'a> {
                 if cols > 1 {
                     row.push_str(if c == ac { "\\clmgf" } else { "\\clmrg" });
                 }
-                row.push_str(&format!("\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx{}", tw(x)));
+                if plain {
+                    row.push_str(&format!("\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx{}", tw(x)));
+                    continue;
+                }
+                // every cell of the grid states its own four sides
+                let cell = look.cells[r][c];
+                if cell.shade {
+                    row.push_str(&format!("\\clcbpat{fill}"));
+                }
+                let [l, rt, tp, bt] = cell.lines;
+                row.push_str(&format!("\\clbrdrt{}\\clbrdrl{}\\clbrdrb{}\\clbrdrr{}\\cellx{}", rtf_border(tp), rtf_border(l), rtf_border(bt), rtf_border(rt), tw(x)));
             }
             self.out.push_str(&row);
             self.out.push('\n');
             for c in 0..t.rows[r].len() {
                 let (a, b) = t.cell_range(els, r, c);
-                let a = if matches!(els.get(a), Some(El::Code(Code::Join { .. }))) { a + 1 } else { a };
+                let mut a = a;
+                while a < b && matches!(els.get(a), Some(El::Code(Code::Join { .. } | Code::CellFmt(_)))) {
+                    a += 1;
+                }
                 self.els(&els[a..b], true);
                 if a == b {
                     self.para_start(els, a, true);
@@ -316,6 +378,19 @@ impl<'a> Rtf<'a> {
             self.out.push_str("\\row\n");
         }
         self.out.push_str("\\pard ");
+    }
+}
+
+/// Style and width of one cell border.
+fn rtf_border(l: LineStyle) -> &'static str {
+    match l {
+        LineStyle::None => "\\brdrnone",
+        LineStyle::Single => "\\brdrs\\brdrw10",
+        LineStyle::Double => "\\brdrdb\\brdrw10",
+        LineStyle::Dashed => "\\brdrdash\\brdrw10",
+        LineStyle::Dotted => "\\brdrdot\\brdrw10",
+        LineStyle::Thick => "\\brdrs\\brdrw30",
+        LineStyle::ExtraThick => "\\brdrs\\brdrw60",
     }
 }
 
@@ -372,6 +447,7 @@ pub fn to_rtf(doc: &Document) -> String {
         spacing: doc.init.line_spacing,
         tabs: doc.init.tabs.clone(),
         rev: None,
+        grays: vec![],
     };
     for e in &doc.initial_codes {
         if let El::Code(c) = e {
@@ -418,7 +494,12 @@ pub fn to_rtf(doc: &Document) -> String {
         rtf_text(&mut n, f);
         s.push_str(&format!("{{\\f{k}\\fnil\\fcharset0 {n};}}"));
     }
-    s.push_str("}\n{\\colortbl;\\red192\\green0\\blue0;}\n");
+    s.push_str("}\n{\\colortbl;\\red192\\green0\\blue0;");
+    for g in &w.grays {
+        let v = u8::from_str_radix(&crate::fmt_build::gray_hex(*g)[..2], 16).unwrap_or(230);
+        s.push_str(&format!("\\red{v}\\green{v}\\blue{v};"));
+    }
+    s.push_str("}\n");
     if !w.authors.is_empty() {
         s.push_str("{\\*\\revtbl {Unknown;}");
         for a in &w.authors {
@@ -478,6 +559,19 @@ const HTML_TAGS: [(Attr, &str, &str); 8] = [
     (Attr::Subscript, "<sub>", "</sub>"),
     (Attr::SmallCaps, "<span style=\"font-variant:small-caps\">", "</span>"),
 ];
+
+/// One table line as a CSS border.
+fn css_line(l: LineStyle) -> &'static str {
+    match l {
+        LineStyle::None => "none",
+        LineStyle::Single => "1px solid #000",
+        LineStyle::Double => "3px double #000",
+        LineStyle::Dashed => "1px dashed #000",
+        LineStyle::Dotted => "1px dotted #000",
+        LineStyle::Thick => "2px solid #000",
+        LineStyle::ExtraThick => "4px solid #000",
+    }
+}
 
 struct Html<'a> {
     doc: &'a Document,
@@ -558,10 +652,35 @@ impl<'a> Html<'a> {
             if i < n {
                 if let El::Code(Code::TblDef { .. }) = els[i] {
                     if let Some(t) = crate::tables::parse(els, i) {
-                        out.push_str("<table style=\"border-collapse:collapse\">\n");
+                        // lines, shading and options: a table without
+                        // [Tbl Opt] / [Cell Lines] codes is written with a
+                        // thin line around every cell; otherwise every cell
+                        // states the lines it shows, a gray background when
+                        // shaded and the cell spacing; header rows stand in
+                        // <thead>; the position is a margin (or width:100%)
+                        let opt = crate::tables::opt_at(els, t.def);
+                        let look = crate::fmt_build::table_look(els, &t);
+                        let px = |wpu: i32| {
+                            let v = format!("{:.2}", wpu as f64 / 12.5);
+                            format!("{}px", v.trim_end_matches('0').trim_end_matches('.'))
+                        };
+                        let place = match opt.pos {
+                            TblPos::Left => String::new(),
+                            TblPos::Right => String::from(";margin-left:auto;margin-right:0"),
+                            TblPos::Center => String::from(";margin-left:auto;margin-right:auto"),
+                            TblPos::Full => String::from(";width:100%"),
+                            TblPos::Set(x) => format!(";margin-left:{}", px(x - self.doc.init.left)),
+                        };
+                        let padding = if opt.pad == TblOpt::default().pad { String::from("2px 6px") } else { format!("{} {} {} {}", px(opt.pad[2]), px(opt.pad[1]), px(opt.pad[3]), px(opt.pad[0])) };
+                        let fill = crate::fmt_build::gray_hex(opt.gray);
+                        let header = (opt.header_rows as usize).min(t.rows.len());
+                        out.push_str(&format!("<table style=\"border-collapse:collapse{place}\">\n"));
                         use crate::tables::Slot;
                         let slots = t.slots(els);
                         for r in 0..t.rows.len() {
+                            if header > 0 && r == 0 {
+                                out.push_str("<thead>\n");
+                            }
                             out.push_str("<tr>");
                             for c in 0..t.rows[r].len() {
                                 let (a, b) = t.cell_range(els, r, c);
@@ -579,11 +698,25 @@ impl<'a> Html<'a> {
                                 if rows > 1 {
                                     span.push_str(&format!(" rowspan=\"{rows}\""));
                                 }
+                                let cell = look.area(r, c, cols, rows);
+                                let mut border = String::from("border:1px solid #000");
+                                if !look.is_plain() && cell.lines != [LineStyle::Single; 4] {
+                                    border = ["left", "right", "top", "bottom"].iter().zip(cell.lines).map(|(side, l)| format!("border-{side}:{}", css_line(l))).collect::<Vec<_>>().join(";");
+                                }
+                                if cell.shade {
+                                    border.push_str(&format!(";background-color:#{fill}"));
+                                }
                                 let mut j2 = *just;
                                 let inner = self.els(&els[a..b], st, &mut j2, true);
-                                out.push_str(&format!("<td{span} style=\"border:1px solid #000;padding:2px 6px;vertical-align:top;width:{}px\">{inner}</td>", w.round()));
+                                out.push_str(&format!("<td{span} style=\"{border};padding:{padding};vertical-align:top;width:{}px\">{inner}</td>", w.round()));
                             }
                             out.push_str("</tr>\n");
+                            if header > 0 && r + 1 == header {
+                                out.push_str(if header < t.rows.len() { "</thead>\n<tbody>\n" } else { "</thead>\n" });
+                            }
+                        }
+                        if header > 0 && header < t.rows.len() {
+                            out.push_str("</tbody>\n");
                         }
                         out.push_str("</table>\n");
                         i = t.off + 1;

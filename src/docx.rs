@@ -865,11 +865,69 @@ fn fix_vmerge(els: &mut Vec<El>, def: usize) {
     }
 }
 
+/// One side of `w:tblBorders` / `w:tcBorders`.
+fn border_xml(side: &str, l: LineStyle) -> String {
+    let (val, sz) = match l {
+        LineStyle::None => return format!("<w:{side} w:val=\"nil\"/>"),
+        LineStyle::Single => ("single", 4),
+        LineStyle::Double => ("double", 4),
+        LineStyle::Dashed => ("dashed", 4),
+        LineStyle::Dotted => ("dotted", 4),
+        LineStyle::Thick => ("single", 12),
+        LineStyle::ExtraThick => ("single", 24),
+    };
+    format!("<w:{side} w:val=\"{val}\" w:sz=\"{sz}\" w:space=\"0\" w:color=\"000000\"/>")
+}
+
+/// A `w:val` / `w:sz` (eighths of a point) border as one of our lines.
+fn border_style(val: &str, sz: i32) -> LineStyle {
+    let v = val.to_ascii_lowercase();
+    if v == "nil" || v == "none" {
+        LineStyle::None
+    } else if v.contains("dot") && !v.contains("dash") {
+        LineStyle::Dotted
+    } else if v.contains("dash") {
+        LineStyle::Dashed
+    } else if v.contains("double") || v.contains("triple") || v.contains("thinthick") || v.contains("thickthin") {
+        LineStyle::Double
+    } else if v == "thick" {
+        if sz >= 18 { LineStyle::ExtraThick } else { LineStyle::Thick }
+    } else {
+        crate::fmt_build::solid_by_width(sz as f64 / 8.0)
+    }
+}
+
+/// The table as WordprocessingML.  Lines: the table's default lines go
+/// into `w:tblBorders` (double outside, single inside); a cell whose lines
+/// differ gets all four in `w:tcBorders`.  Shading: `w:shd` with a gray
+/// fill.  Header rows: `w:tblHeader`.  Position: `w:jc`, `w:tblInd`, or a
+/// width of 100 % for Full.  Spacing: `w:tblCellMar`.
 fn table_xml(doc: &Document, els: &[El], t: &crate::tables::Table, parts: &mut Parts) -> String {
-    let mut x = String::from(
-        "<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders><w:top w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:left w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:bottom w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:right w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/></w:tblBorders><w:tblLayout w:type=\"fixed\"/><w:tblCellMar><w:left w:w=\"115\" w:type=\"dxa\"/><w:right w:w=\"115\" w:type=\"dxa\"/></w:tblCellMar></w:tblPr><w:tblGrid>",
+    let opt = crate::tables::opt_at(els, t.def);
+    let look = crate::fmt_build::table_look(els, t);
+    let fill = crate::fmt_build::gray_hex(opt.gray);
+    let mut cols = t.cols.clone();
+    let mut pr = String::from("<w:tblW w:w=\"0\" w:type=\"auto\"/>");
+    match opt.pos {
+        TblPos::Left => {}
+        TblPos::Right => pr.push_str("<w:jc w:val=\"right\"/>"),
+        TblPos::Center => pr.push_str("<w:jc w:val=\"center\"/>"),
+        TblPos::Full => {
+            pr = String::from("<w:tblW w:w=\"5000\" w:type=\"pct\"/>");
+            cols = crate::fmt_build::full_widths(&cols, doc.init.page_width - doc.init.left - doc.init.right);
+        }
+        TblPos::Set(x) => pr.push_str(&format!("<w:tblInd w:w=\"{}\" w:type=\"dxa\"/>", twips(x - doc.init.left))),
+    }
+    let mar = if opt.pad == TblOpt::default().pad {
+        String::from("<w:left w:w=\"115\" w:type=\"dxa\"/><w:right w:w=\"115\" w:type=\"dxa\"/>")
+    } else {
+        let m = |side: &str, k: usize| format!("<w:{side} w:w=\"{}\" w:type=\"dxa\"/>", twips(opt.pad[k]));
+        format!("{}{}{}{}", m("top", 2), m("left", 0), m("bottom", 3), m("right", 1))
+    };
+    let mut x = format!(
+        "<w:tbl><w:tblPr>{pr}<w:tblBorders><w:top w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:left w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:bottom w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:right w:val=\"double\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"000000\"/></w:tblBorders><w:tblLayout w:type=\"fixed\"/><w:tblCellMar>{mar}</w:tblCellMar></w:tblPr><w:tblGrid>"
     );
-    for w in &t.cols {
+    for w in &cols {
         x.push_str(&format!("<w:gridCol w:w=\"{}\"/>", twips(*w)));
     }
     x.push_str("</w:tblGrid>");
@@ -878,7 +936,7 @@ fn table_xml(doc: &Document, els: &[El], t: &crate::tables::Table, parts: &mut P
     use crate::tables::Slot;
     let slots = t.slots(els);
     for (r, row) in t.rows.iter().enumerate() {
-        x.push_str("<w:tr>");
+        x.push_str(if r < opt.header_rows as usize { "<w:tr><w:trPr><w:tblHeader/></w:trPr>" } else { "<w:tr>" });
         for (c, _) in row.iter().enumerate() {
             let (a, b) = t.cell_range(els, r, c);
             let (span, merge) = match slots[r][c] {
@@ -894,9 +952,19 @@ fn table_xml(doc: &Document, els: &[El], t: &crate::tables::Table, parts: &mut P
                     }
                 }
             };
-            let w: i32 = (c..(c + span).min(t.cols.len().max(c + 1))).map(|k| t.cols.get(k).copied().unwrap_or(1200)).sum();
+            let w: i32 = (c..(c + span).min(cols.len().max(c + 1))).map(|k| cols.get(k).copied().unwrap_or(1200)).sum();
             let grid = if span > 1 { format!("<w:gridSpan w:val=\"{span}\"/>") } else { String::new() };
-            x.push_str(&format!("<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/>{grid}{merge}</w:tcPr>", twips(w)));
+            // every piece of a cell joined downwards carries its own lines
+            let (cell, plain) = (look.area(r, c, span, 1), look.plain_area(r, c, span, 1));
+            let mut fmt = String::new();
+            if cell.lines != plain.lines {
+                let [l, rt, tp, bt] = cell.lines;
+                fmt = format!("<w:tcBorders>{}{}{}{}</w:tcBorders>", border_xml("top", tp), border_xml("left", l), border_xml("bottom", bt), border_xml("right", rt));
+            }
+            if cell.shade {
+                fmt.push_str(&format!("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"{fill}\"/>"));
+            }
+            x.push_str(&format!("<w:tc><w:tcPr><w:tcW w:w=\"{}\" w:type=\"dxa\"/>{grid}{merge}{fmt}</w:tcPr>", twips(w)));
             if merge == "<w:vMerge/>" {
                 x.push_str("<w:p/></w:tc>");
                 continue;
@@ -909,6 +977,17 @@ fn table_xml(doc: &Document, els: &[El], t: &crate::tables::Table, parts: &mut P
     }
     x.push_str("</w:tbl>");
     x
+}
+
+/// Where the reader is inside the properties of a table.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TblCtx {
+    None,
+    TblPr,
+    TblBorders,
+    TblCellMar,
+    TcPr,
+    TcBorders,
 }
 
 fn is_formatting(e: &El) -> bool {
@@ -1574,6 +1653,18 @@ pub fn parse_document_xml_full(
     // A cell merged across columns (w:gridSpan) is followed by empty cells,
     // so the cells after it stay in their own columns.
     let mut span_pad: usize = 0;
+    // lines, shading and options of the table being read (see
+    // `fmt_build::apply_table_in`): where we are in its properties, the
+    // rows seen so far, the grid column of the current / the next cell
+    let mut tin = crate::fmt_build::TableIn::default();
+    let mut tctx = TblCtx::None;
+    let (mut trows, mut tcol, mut tcol_next) = (0usize, 0usize, 0usize);
+    // w:tblInd counts from the left margin, which stands at the end of the file
+    let left_margin = xml.find("<w:pgMar").and_then(|i| {
+        let tag = &xml[i..xml[i..].find('>').map(|k| i + k).unwrap_or(xml.len())];
+        let v = tag.split("w:left=\"").nth(1)?;
+        v[..v.find('"')?].parse::<i32>().ok().map(wpu_from_twips)
+    });
     let mut sect_seen = false;
     // sections with <w:cols> → [Col Def][Col On] … [Col Off]
     let mut sect = SectCols::default();
@@ -1681,6 +1772,73 @@ pub fn parse_document_xml_full(
                         if !para_keep {
                             para_keep = true;
                             d.els.push(El::Code(Code::Fmt(crate::fmt::Fmt::BlockPro(true))));
+                        }
+                    }
+                    b"tblPr" if depth_tbl == 1 && !is_empty => tctx = TblCtx::TblPr,
+                    b"tcPr" if depth_tbl == 1 && !is_empty => tctx = TblCtx::TcPr,
+                    b"tblBorders" if tctx == TblCtx::TblPr && !is_empty => tctx = TblCtx::TblBorders,
+                    b"tblCellMar" if tctx == TblCtx::TblPr && !is_empty => tctx = TblCtx::TblCellMar,
+                    b"tcBorders" if tctx == TblCtx::TcPr && !is_empty => tctx = TblCtx::TcBorders,
+                    b"top" | b"left" | b"start" | b"bottom" | b"right" | b"end" | b"insideH" | b"insideV"
+                        if matches!(tctx, TblCtx::TblBorders | TblCtx::TcBorders | TblCtx::TblCellMar) =>
+                    {
+                        // our order of sides: left, right, top, bottom (+ inside horizontal, vertical)
+                        let side = match name.as_slice() {
+                            b"left" | b"start" => 0,
+                            b"right" | b"end" => 1,
+                            b"top" => 2,
+                            b"bottom" => 3,
+                            b"insideH" => 4,
+                            _ => 5,
+                        };
+                        let num = |k: &[u8]| get_attr(e, k).and_then(|v| v.parse::<i32>().ok());
+                        if tctx == TblCtx::TblCellMar {
+                            if side < 4 && get_attr(e, b"type").as_deref().unwrap_or("dxa") == "dxa" {
+                                tin.pad[side] = num(b"w").map(wpu_from_twips);
+                            }
+                        } else if let Some(val) = get_attr(e, b"val") {
+                            let l = border_style(&val, num(b"sz").unwrap_or(4));
+                            if tctx == TblCtx::TblBorders {
+                                tin.frame[side] = Some(l);
+                            } else if side < 4 && trows > 0 {
+                                tin.cell(trows - 1, tcol).lines[side] = Some(l);
+                            }
+                        }
+                    }
+                    b"shd" if tctx == TblCtx::TcPr && trows > 0 => {
+                        // a fill colour, or a pattern of black on white ("pct25")
+                        let val = get_attr(e, b"val").unwrap_or_default();
+                        let fill = get_attr(e, b"fill").and_then(|f| if f == "auto" { None } else { Some(crate::fmt_build::gray_of_hex(&f)) });
+                        let gray = match val.strip_prefix("pct").and_then(|n| n.parse::<u8>().ok()) {
+                            Some(n) if !matches!(fill, Some(Some(_))) => Some(n.min(100)).filter(|n| *n > 0),
+                            _ if val == "solid" => get_attr(e, b"color").map_or(Some(100), |c| if c == "auto" { Some(100) } else { crate::fmt_build::gray_of_hex(&c) }),
+                            _ => fill.flatten(),
+                        };
+                        tin.cell(trows - 1, tcol).fill = gray;
+                    }
+                    b"jc" if tctx == TblCtx::TblPr => match get_attr(e, b"val").as_deref() {
+                        Some("center") => tin.pos = Some(TblPos::Center),
+                        Some("right") | Some("end") => tin.pos = Some(TblPos::Right),
+                        _ => {}
+                    },
+                    b"tblW" if tctx == TblCtx::TblPr => {
+                        // as wide as the text: 5000 fiftieths of a percent, or "100%"
+                        let w = get_attr(e, b"w").unwrap_or_default();
+                        if get_attr(e, b"type").as_deref() == Some("pct") && (w == "5000" || w == "100%") {
+                            tin.pos = Some(TblPos::Full);
+                        }
+                    }
+                    b"tblInd" if tctx == TblCtx::TblPr => {
+                        // small indents only line the cell text up with the margin
+                        let ind = get_attr(e, b"w").and_then(|v| v.parse::<i32>().ok()).map(wpu_from_twips).unwrap_or(0);
+                        if ind.abs() > 150 && tin.pos.is_none() && get_attr(e, b"type").as_deref().unwrap_or("dxa") == "dxa" {
+                            tin.pos = Some(TblPos::Set((left_margin.unwrap_or(d.init.left) + ind).max(0)));
+                        }
+                    }
+                    b"tblHeader" if depth_tbl == 1 && trows > 0 && toggle_on(e) => {
+                        // only rows at the top of the table can be header rows
+                        if tin.header_rows == trows - 1 {
+                            tin.header_rows = trows;
                         }
                     }
                     b"jc" if in_ppr => {
@@ -1965,6 +2123,8 @@ pub fn parse_document_xml_full(
                             sect.next_section(&mut d);
                             tbl_def_at = Some(d.els.len());
                             d.els.push(El::Code(Code::TblDef { cols: vec![] }));
+                            tin = Default::default();
+                            trows = 0;
                         }
                     }
                     b"gridCol" if depth_tbl == 1 => {
@@ -1977,6 +2137,7 @@ pub fn parse_document_xml_full(
                     b"gridSpan" if depth_tbl == 1 => {
                         let n = get_attr(e, b"val").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).clamp(1, 64);
                         span_pad = n - 1;
+                        tcol_next = tcol + n;
                         if n > 1 && matches!(d.els.last(), Some(El::Code(Code::Cell))) {
                             d.els.push(El::Code(Code::Join { cols: n as u8, rows: 1 }));
                         }
@@ -2000,6 +2161,8 @@ pub fn parse_document_xml_full(
                     }
                     b"tc" => {
                         if depth_tbl == 1 {
+                            tcol = tcol_next;
+                            tcol_next += 1;
                             for _ in 0..std::mem::take(&mut span_pad) {
                                 d.els.push(El::Code(Code::Cell));
                             }
@@ -2015,6 +2178,8 @@ pub fn parse_document_xml_full(
                     b"tr" => {
                         cell_count = 0;
                         if depth_tbl == 1 {
+                            trows += 1;
+                            tcol_next = 0;
                             for _ in 0..std::mem::take(&mut span_pad) {
                                 d.els.push(El::Code(Code::Cell));
                             }
@@ -2048,6 +2213,9 @@ pub fn parse_document_xml_full(
                 }
             }
             Ok(Event::End(ref e)) => match local(e.name().as_ref()) {
+                b"tblPr" | b"tcPr" if depth_tbl == 1 => tctx = TblCtx::None,
+                b"tblBorders" | b"tblCellMar" if matches!(tctx, TblCtx::TblBorders | TblCtx::TblCellMar) => tctx = TblCtx::TblPr,
+                b"tcBorders" if tctx == TblCtx::TcBorders => tctx = TblCtx::TcPr,
                 b"pPr" if in_ppr => {
                     in_ppr = false;
                     if let Some(id) = p_style.take() {
@@ -2103,6 +2271,7 @@ pub fn parse_document_xml_full(
                                     cols.resize(ncols, w);
                                 }
                             }
+                            crate::fmt_build::apply_table_in(&mut d.els, at, &std::mem::take(&mut tin));
                         }
                         first_para = true;
                     }
@@ -2283,6 +2452,96 @@ mod tests {
         let t2 = crate::tables::parse(&d2.els, d2.els.iter().position(|e| matches!(e, El::Code(Code::TblDef { .. }))).unwrap()).unwrap();
         assert_eq!(t2.slots(&d2.els), t.slots(&d.els), "{:?}", d2.els);
         assert_eq!(d2.plain_text(0, d2.len()), d.plain_text(0, d.len()));
+    }
+
+    #[test]
+    fn table_lines_and_options_via_xml() {
+        use crate::fmt_build::testkit::*;
+        for pos in POSITIONS {
+            let d = lines_doc(some_opt(pos));
+            let xml = document_xml(&d, &mut Parts::default());
+            assert_eq!(xml.matches("<w:tblHeader/>").count(), 2, "{xml}");
+            assert_eq!(xml.matches("w:fill=\"BFBFBF\"").count(), 2, "{xml}");
+            assert!(xml.contains("<w:top w:val=\"single\" w:sz=\"12\"") && xml.contains("<w:right w:val=\"single\" w:sz=\"24\"") && xml.contains("w:val=\"nil\""), "{xml}");
+            assert!(xml.contains("<w:tblCellMar><w:top w:w=\"36\" w:type=\"dxa\"/><w:left w:w=\"72\" w:type=\"dxa\"/><w:bottom w:w=\"48\" w:type=\"dxa\"/><w:right w:w=\"216\" w:type=\"dxa\"/></w:tblCellMar>"), "{xml}");
+            assert_same_look(&d, &via_xml(&d));
+        }
+        // lines and shading only: no [Tbl Opt] comes back
+        let d = lines_doc(TblOpt::default());
+        let d2 = via_xml(&d);
+        assert_same_look(&d, &d2);
+        assert!(!d2.els.iter().any(|e| matches!(e, El::Code(Code::TblOpt(_)))));
+    }
+
+    #[test]
+    fn plain_table_is_written_as_before_and_reads_without_codes() {
+        let mut d = Document::new();
+        d.els = crate::tables::new_table(2, 2, 4800);
+        let xml = document_xml(&d, &mut Parts::default());
+        assert!(xml.contains("<w:tbl><w:tblPr><w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders><w:top w:val=\"double\""), "{xml}");
+        assert!(xml.contains("<w:tblCellMar><w:left w:w=\"115\" w:type=\"dxa\"/><w:right w:w=\"115\" w:type=\"dxa\"/></w:tblCellMar>"), "{xml}");
+        assert!(xml.contains("<w:tr><w:tc><w:tcPr><w:tcW w:w=\"2880\" w:type=\"dxa\"/></w:tcPr>"), "{xml}");
+        assert!(!xml.contains("tcBorders") && !xml.contains("w:shd") && !xml.contains("tblHeader") && !xml.contains("tblInd"), "{xml}");
+        assert_eq!(via_xml(&d).els, d.els);
+    }
+
+    /// A table as Word writes it.
+    fn word_table(tbl_pr: &str, rows: &[&[(&str, &str)]], header: usize) -> Document {
+        let mut x = String::from("<w:document xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:body><w:tbl><w:tblPr><w:tblStyle w:val=\"TableGrid\"/>");
+        x.push_str(tbl_pr);
+        x.push_str("<w:tblLook w:val=\"04A0\"/></w:tblPr><w:tblGrid><w:gridCol w:w=\"2880\"/><w:gridCol w:w=\"2880\"/></w:tblGrid>");
+        for (r, row) in rows.iter().enumerate() {
+            x.push_str("<w:tr>");
+            if r < header {
+                x.push_str("<w:trPr><w:tblHeader/></w:trPr>");
+            }
+            for (pr, text) in row.iter() {
+                x.push_str(&format!("<w:tc><w:tcPr><w:tcW w:w=\"2880\" w:type=\"dxa\"/>{pr}</w:tcPr><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:tc>"));
+            }
+            x.push_str("</w:tr>");
+        }
+        x.push_str("</w:tbl><w:p><w:r><w:t>Ende</w:t></w:r></w:p><w:sectPr><w:pgSz w:w=\"12240\" w:h=\"15840\"/><w:pgMar w:top=\"1440\" w:right=\"1440\" w:bottom=\"1440\" w:left=\"1440\"/></w:sectPr></w:body></w:document>");
+        parse_document_xml(&x, None)
+    }
+
+    const WORD_GRID: &str = "<w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblBorders><w:top w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:left w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:bottom w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideH w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:insideV w:val=\"single\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/></w:tblBorders>";
+
+    #[test]
+    fn word_table_with_the_ordinary_grid_gets_no_codes() {
+        // Word's own grid, its cell margins, a small indent, a white fill
+        let pr = format!("{WORD_GRID}<w:tblInd w:w=\"108\" w:type=\"dxa\"/><w:tblCellMar><w:left w:w=\"108\" w:type=\"dxa\"/><w:right w:w=\"108\" w:type=\"dxa\"/></w:tblCellMar>");
+        let white = "<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"FFFFFF\"/>";
+        let d = word_table(&pr, &[&[(white, "A"), ("", "B")], &[("<w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"auto\"/>", "C"), ("", "D")]], 0);
+        crate::fmt_build::testkit::assert_no_table_codes(&d);
+        assert_eq!(d.plain_text(0, d.len()).replace('\n', "|"), "A\tB|C\tD|Ende");
+        // no borders stated at all (they are in the table style): the same
+        crate::fmt_build::testkit::assert_no_table_codes(&word_table("", &[&[("", "A"), ("", "B")]], 0));
+    }
+
+    #[test]
+    fn word_table_lines_shading_header_and_position() {
+        use LineStyle::{Dashed, Single, Thick};
+        let pr = format!("<w:tblW w:w=\"0\" w:type=\"auto\"/><w:jc w:val=\"center\"/>{WORD_GRID}");
+        let head = "<w:tcBorders><w:bottom w:val=\"single\" w:sz=\"12\" w:space=\"0\" w:color=\"auto\"/></w:tcBorders><w:shd w:val=\"clear\" w:color=\"auto\" w:fill=\"D9D9D9\"/>";
+        let open = "<w:tcBorders><w:top w:val=\"dashed\" w:sz=\"4\" w:space=\"0\" w:color=\"auto\"/><w:right w:val=\"nil\"/></w:tcBorders>";
+        let d = word_table(&pr, &[&[(head, "Name"), (head, "Ort")], &[("", "a"), ("", "b")], &[("<w:shd w:val=\"pct25\" w:color=\"auto\" w:fill=\"auto\"/>", "c"), (open, "d")]], 1);
+        let def = crate::fmt_build::testkit::def_of(&d);
+        let t = crate::tables::parse(&d.els, def).unwrap();
+        // D9D9D9 is 15 % of black; one darkness per table: the first shaded cell counts
+        assert_eq!(crate::tables::opt_at(&d.els, def), TblOpt { header_rows: 1, pos: TblPos::Center, gray: 15, ..Default::default() });
+        let look = crate::fmt_build::table_look(&d.els, &t);
+        // not the ordinary grid, so the single frame of the file is kept
+        assert_eq!(look.cells[0][0], crate::fmt_build::CellLook { lines: [Single, Single, Single, Thick], shade: true });
+        assert_eq!(look.cells[0][1], crate::fmt_build::CellLook { lines: [Single, Single, Single, Thick], shade: true });
+        assert_eq!(look.cells[1][0], crate::fmt_build::CellLook { lines: [Single, Single, Thick, Single], shade: false });
+        assert_eq!(look.cells[2][0], crate::fmt_build::CellLook { lines: [Single, Single, Single, Single], shade: true });
+        assert_eq!(look.cells[2][1], crate::fmt_build::CellLook { lines: [Single, LineStyle::None, Dashed, Single], shade: false });
+        assert_eq!(d.plain_text(0, d.len()).replace('\n', "|"), "Name\tOrt|a\tb|c\td|Ende");
+        // an indent counts from the left margin; a table as wide as the text is Full
+        let d = word_table("<w:tblW w:w=\"0\" w:type=\"auto\"/><w:tblInd w:w=\"720\" w:type=\"dxa\"/>", &[&[("", "A"), ("", "B")]], 0);
+        assert_eq!(crate::tables::opt_at(&d.els, 0).pos, TblPos::Set(1200 + 600));
+        let d = word_table("<w:tblW w:w=\"5000\" w:type=\"pct\"/>", &[&[("", "A"), ("", "B")]], 0);
+        assert_eq!(crate::tables::opt_at(&d.els, 0).pos, TblPos::Full);
     }
 
     /// Write, then read back through document.xml only (no private stream).

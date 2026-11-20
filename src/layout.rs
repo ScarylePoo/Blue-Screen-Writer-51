@@ -74,47 +74,139 @@ pub static COMMENTS_DISPLAY: std::sync::atomic::AtomicBool = std::sync::atomic::
 pub struct TableGeom {
     /// Column boundaries (WPU, absolute), ncols + 1 entries.
     pub x: Vec<i32>,
-    /// Per row, where the rules are (joined cells have none inside).
+    /// Per row, which lines it has (joined cells have none inside) and
+    /// which cells are shaded.
     pub rows: Vec<RowGeom>,
+    /// The line above the first row, per column.
+    pub top: Vec<LineStyle>,
+    /// Spacing between text and lines: left, right, top, bottom.
+    pub pad: [i32; 4],
+    /// Darkness of shaded cells, % of black.
+    pub gray: u8,
+    /// Rows repeated at the top of every page the table continues on.
+    pub header_rows: usize,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct RowGeom {
-    /// A vertical rule at column boundary k (ncols + 1 entries).
-    pub open: Vec<bool>,
-    /// A horizontal rule below column c of this row (ncols entries).
-    pub below: Vec<bool>,
+    /// The vertical line at column boundary k beside this row (ncols + 1
+    /// entries; `None` = no line).
+    pub open: Vec<LineStyle>,
+    /// The horizontal line below column c of this row (ncols entries).
+    pub below: Vec<LineStyle>,
+    /// Column c of this row is (part of) a shaded cell.
+    pub shade: Vec<bool>,
 }
 
 impl TableGeom {
     /// Vertical rule at boundary `k` beside row `r`?  (Rows the table
     /// doesn't know have all rules.)
     pub fn rule_v(&self, r: usize, k: usize) -> bool {
-        self.rows.get(r).and_then(|g| g.open.get(k).copied()).unwrap_or(true)
+        self.style_v(r, k) != LineStyle::None
     }
     /// Horizontal rule below column `c` of row `r`?
     pub fn rule_h(&self, r: usize, c: usize) -> bool {
-        self.rows.get(r).and_then(|g| g.below.get(c).copied()).unwrap_or(true)
+        self.style_h(r, c) != LineStyle::None
+    }
+    /// The line at boundary `k` beside row `r`.
+    pub fn style_v(&self, r: usize, k: usize) -> LineStyle {
+        let outer = k == 0 || k + 1 == self.x.len();
+        self.rows.get(r).and_then(|g| g.open.get(k).copied()).unwrap_or(if outer { LineStyle::Double } else { LineStyle::Single })
+    }
+    /// The line below column `c` of row `r`.
+    pub fn style_h(&self, r: usize, c: usize) -> LineStyle {
+        self.rows.get(r).and_then(|g| g.below.get(c).copied()).unwrap_or(LineStyle::Single)
+    }
+    /// The line of the border in front of row `row` (0 = the top of the
+    /// table, the number of rows = its bottom) at column `c`.
+    pub fn line_above(&self, row: usize, c: usize) -> LineStyle {
+        match row {
+            0 => self.top.get(c).copied().unwrap_or(LineStyle::Double),
+            _ => self.style_h(row - 1, c),
+        }
+    }
+    /// Is column `c` of row `r` shaded?
+    pub fn shaded(&self, r: usize, c: usize) -> bool {
+        self.rows.get(r).and_then(|g| g.shade.get(c).copied()).unwrap_or(false)
+    }
+    /// Height a border row takes on paper: the line itself, the bottom
+    /// spacing of the row above it and the top spacing of the row below.
+    pub fn border_height(&self, kind: BorderKind) -> i32 {
+        BORDER_H + if kind != BorderKind::Top { self.pad[3] } else { 0 } + if kind != BorderKind::Bottom { self.pad[2] } else { 0 }
+    }
+    /// Where the line is inside its border row (its middle, from the top
+    /// of the row).
+    pub fn rule_offset(&self, kind: BorderKind) -> i32 {
+        BORDER_H / 2 + if kind != BorderKind::Top { self.pad[3] } else { 0 }
     }
 }
 
-/// Where the rules of the table starting at `def` are, and how many
-/// columns every cell covers (0 = hidden under a joined cell).
-fn table_rules(els: &[El], def: usize, ncols: usize) -> (Vec<RowGeom>, Vec<Vec<usize>>) {
+/// The header rows of a table printed again at the top of a page the
+/// table continues on (Table Edit, 4 Header).  The edit screen does not
+/// show them; they take room on the page.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TblRepeat {
+    pub table: usize,
+    pub page: u32,
+    /// Where the repeated rows start on that page.
+    pub y: i32,
+    /// The visual rows that are repeated (`first_v..=last_v`).
+    pub first_v: usize,
+    pub last_v: usize,
+}
+
+/// The lines of the table starting at `def` (plus the line above its first
+/// row), its shaded cells, and how many columns every cell covers (0 =
+/// hidden under a joined cell).
+///
+/// A line between two cells is shared.  Which setting counts:
+///  1. the `Left` of the cell on the right / the `Top` of the cell below,
+///     if set;
+///  2. otherwise the `Right` of the cell on the left / the `Bottom` of
+///     the cell above, if set;
+///  3. otherwise the default: double on the outside of the table, single
+///     inside.
+/// (Table Edit always writes a line where rule 1 looks and clears the
+/// other side, so there the setting made last counts.)  A joined cell
+/// counts as one cell: its own `[Cell Lines]`, no lines inside.
+fn table_rules(els: &[El], def: usize, ncols: usize) -> (Vec<RowGeom>, Vec<LineStyle>, Vec<Vec<usize>>) {
     use crate::tables::Slot;
-    let Some(t) = crate::tables::parse(els, def) else { return (vec![], vec![]) };
+    let Some(t) = crate::tables::parse(els, def) else { return (vec![], vec![], vec![]) };
     let slots = t.slots(els);
     let owner = |r: usize, c: usize| match slots.get(r).and_then(|row| row.get(c)) {
         Some(Slot::Covered { r, c }) => (*r, *c),
         _ => (r, c),
     };
+    let fmts: Vec<Vec<CellFmt>> = (0..t.rows.len()).map(|r| (0..t.rows[r].len()).map(|c| t.fmt_of(els, r, c).map(|x| x.1).unwrap_or_default()).collect()).collect();
+    let fmt = |(r, c): (usize, usize)| fmts.get(r).and_then(|row| row.get(c)).copied().unwrap_or_default();
     let nrows = slots.len();
     let mut geom = Vec::with_capacity(nrows);
     let mut spans = Vec::with_capacity(nrows);
     for r in 0..nrows {
-        let open = (0..=ncols).map(|k| k == 0 || k == ncols || owner(r, k - 1) != owner(r, k)).collect();
-        let below = (0..ncols).map(|c| r + 1 >= nrows || owner(r, c) != owner(r + 1, c)).collect();
-        geom.push(RowGeom { open, below });
+        let open = (0..=ncols)
+            .map(|k| {
+                let left = (k > 0).then(|| owner(r, k - 1));
+                let right = (k < ncols).then(|| owner(r, k));
+                if left.is_some() && left == right {
+                    return LineStyle::None;
+                }
+                let outer = if k == 0 || k == ncols { LineStyle::Double } else { LineStyle::Single };
+                right.and_then(|o| fmt(o).lines[0]).or(left.and_then(|o| fmt(o).lines[1])).unwrap_or(outer)
+            })
+            .collect();
+        let below = (0..ncols)
+            .map(|c| {
+                let up = owner(r, c);
+                let down = (r + 1 < nrows).then(|| owner(r + 1, c));
+                if down == Some(up) {
+                    return LineStyle::None;
+                }
+                let outer = if down.is_none() { LineStyle::Double } else { LineStyle::Single };
+                down.and_then(|o| fmt(o).lines[2]).or(fmt(up).lines[3]).unwrap_or(outer)
+            })
+            .collect();
+        let shade = (0..ncols).map(|c| fmt(owner(r, c)).shade).collect();
+        geom.push(RowGeom { open, below, shade });
         spans.push(
             slots[r]
                 .iter()
@@ -126,11 +218,40 @@ fn table_rules(els: &[El], def: usize, ncols: usize) -> (Vec<RowGeom>, Vec<Vec<u
                 .collect(),
         );
     }
-    (geom, spans)
+    let top = (0..ncols).map(|c| fmt(owner(0, c)).lines[2].unwrap_or(LineStyle::Double)).collect();
+    (geom, top, spans)
 }
 
-/// Inner padding of a table cell.
-pub const CELL_PAD: i32 = 120;
+/// Where the columns of a table stand: its boundaries (WPU from the left
+/// paper edge) for the column widths `cols` between the margins
+/// `left..right_edge` (Table Options, 3 Position of Table).
+fn table_columns(cols: &[i32], pos: TblPos, left: i32, right_edge: i32) -> Vec<i32> {
+    let mut widths: Vec<i32> = cols.iter().map(|w| (*w).max(COL_WPU * 2)).collect();
+    let total: i32 = widths.iter().sum();
+    let avail = right_edge - left;
+    if pos == TblPos::Full && total > 0 && avail > 0 && total != avail {
+        // every column keeps its share of the width
+        let mut used = 0;
+        let n = widths.len();
+        for (k, w) in widths.iter_mut().enumerate() {
+            *w = if k + 1 == n { avail - used } else { (*w as i64 * avail as i64 / total as i64) as i32 }.max(COL_WPU);
+            used += *w;
+        }
+    }
+    let total: i32 = widths.iter().sum();
+    let x0 = match pos {
+        TblPos::Left | TblPos::Full => left,
+        TblPos::Right => (right_edge - total).max(left),
+        TblPos::Center => (left + (avail - total) / 2).max(left),
+        TblPos::Set(x) => x.max(0),
+    };
+    let mut x = vec![x0];
+    for w in widths {
+        x.push(x.last().unwrap() + w);
+    }
+    x
+}
+
 /// Height a table border takes on paper.
 pub const BORDER_H: i32 = 60;
 
@@ -282,6 +403,8 @@ pub struct Layout {
     pub page_paper: Vec<Option<crate::fmt::Paper>>,
     /// Graphics boxes and where they landed (gfx.rs).
     pub boxes: Vec<crate::gfx::BoxGeom>,
+    /// Table header rows printed again on following pages.
+    pub tbl_repeats: Vec<TblRepeat>,
     /// Screen columns needed by the widest line that contains double-width
     /// (CJK) characters; 0 when there are none.
     pub wide_cols: i32,
@@ -582,17 +705,17 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
                     if let Some(mut t) = tbl.take() {
                         finish_row(&mut t, &mut next_vrow, &mut vrows, BorderKind::Bottom);
                     }
-                    let mut x = vec![st.left];
-                    for w in cols {
-                        x.push(x.last().unwrap() + (*w).max(COL_WPU * 2));
-                    }
-                    let (rows, spans) = table_rules(els, pre_end, cols.len());
-                    tables.push(TableGeom { x: x.clone(), rows });
+                    let opt = crate::tables::opt_at(els, pre_end);
+                    let x = table_columns(cols, opt.pos, st.left, st.page_w - st.right);
+                    let (rows, top, spans) = table_rules(els, pre_end, cols.len());
+                    tables.push(TableGeom { x: x.clone(), rows, top, pad: opt.pad, gray: opt.gray, header_rows: opt.header_rows as usize });
                     ensure(&mut vrows, next_vrow);
                     vrows[next_vrow] = VRow::Border { table: tables.len() - 1, kind: BorderKind::Top, row: 0 };
                     next_vrow += 1;
                     tbl = Some(TblState { id: tables.len() - 1, x, done: 0, spans, col: None, row_open: false, row_base: next_vrow, row_max: 0, cell_lines: 0 });
                 }
+                // the table's settings belong to its [Tbl Def]
+                El::Code(Code::TblOpt(_)) if pre_end > 0 && matches!(els[pre_end - 1], El::Code(Code::TblDef { .. })) => {}
                 El::Code(Code::Row) => {
                     if let Some(t) = tbl.as_mut() {
                         finish_row(t, &mut next_vrow, &mut vrows, BorderKind::Mid);
@@ -666,13 +789,15 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
             indent_right = None;
         }
         let in_col = colrun.as_mut().map(|r| r.edges(line_start, col_hints));
+        // spacing between text and lines (Table Options)
+        let cell_pad = tbl.as_ref().map(|t| tables[t.id].pad).unwrap_or([0; 4]);
         let mut lm = match (in_cell, in_col) {
-            (Some((a, _)), _) => a + CELL_PAD,
+            (Some((a, _)), _) => a + cell_pad[0],
             (None, Some((a, _))) => indent_left.unwrap_or(a),
             (None, None) => indent_left.unwrap_or(st.left),
         };
         let mut rm_limit = match (in_cell, in_col) {
-            (Some((_, b)), _) => b - CELL_PAD,
+            (Some((a, b)), _) => (b - cell_pad[1]).max(a + cell_pad[0] + COL_WPU),
             (None, Some((_, b))) => b - indent_right.unwrap_or(0),
             (None, None) => st.page_w - st.right - indent_right.unwrap_or(0),
         };
@@ -703,7 +828,12 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
             }
         }
         let mut pos = lm; // current x in WPU
-        let mut col = lm / COL_WPU;
+        // (on screen the text of a cell never stands on its left line)
+        let first_col = match in_cell {
+            Some((a, _)) => (lm / COL_WPU).max(a / COL_WPU + 1),
+            None => lm / COL_WPU,
+        };
+        let mut col = first_col;
         let mut cells: Vec<LCell> = Vec::new();
         let mut caret: Vec<(i32, i32)> = Vec::new();
         let mut max_h = st_line_height(&st, st.font.size_cpt);
@@ -717,7 +847,7 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
         // justification in effect at the first character of the line (a [Just]
         // code later on the line applies from the next line)
         let mut first_just: Option<Justify> = None;
-        let lm_col = lm / COL_WPU;
+        let lm_col = first_col;
         let rm_col = rm_limit / COL_WPU;
 
         while i < n {
@@ -1262,6 +1392,7 @@ fn layout_lines(doc: &Document, m: &dyn Metrics, col_hints: &std::collections::H
         hyph_ask,
         page_paper: vec![],
         boxes: std::mem::take(&mut gx.boxes),
+        tbl_repeats: vec![],
         wide_cols: 0,
     };
     let mut l = l;
@@ -1395,6 +1526,32 @@ fn paginate_pass(doc: &Document, l: &mut Layout, m: &dyn Metrics, keep: &[bool],
         }
     };
     let nv = l.vrows.len();
+    // tables: for every visual row the table and row it belongs to (for a
+    // border: the row that follows it), and where each table's header
+    // rows start and end
+    let mut vrow_tbl: Vec<Option<(usize, usize)>> = vec![None; nv];
+    let mut tbl_top_v: std::collections::HashMap<usize, usize> = Default::default();
+    let mut tbl_hdr_v: std::collections::HashMap<usize, usize> = Default::default();
+    {
+        let mut cur: Option<(usize, usize)> = None;
+        for (v, vr) in l.vrows.iter().enumerate() {
+            match vr {
+                VRow::Border { table, kind, row } => {
+                    vrow_tbl[v] = Some((*table, *row));
+                    cur = (*kind != BorderKind::Bottom).then_some((*table, *row));
+                    if *kind == BorderKind::Top {
+                        tbl_top_v.insert(*table, v);
+                    } else if *kind == BorderKind::Mid && *row == l.tables[*table].header_rows {
+                        tbl_hdr_v.insert(*table, v);
+                    }
+                }
+                VRow::Lines(_) => vrow_tbl[v] = cur,
+                VRow::Gap(_) => {}
+            }
+        }
+    }
+    let mut vrow_h = vec![0; nv];
+    let mut tbl_repeats: Vec<TblRepeat> = vec![];
     let mut vrow_y = vec![0; nv];
     let mut vrow_page = vec![1; nv];
     let mut drows: Vec<DRow> = Vec::with_capacity(nv + 8);
@@ -1422,9 +1579,10 @@ fn paginate_pass(doc: &Document, l: &mut Layout, m: &dyn Metrics, keep: &[bool],
                 ls.iter().any(|&li| l.lines[li].term == LineEnd::HardPage && l.line_col.get(li).is_none_or(|c| c.is_none())),
                 ls.clone(),
             ),
-            VRow::Border { .. } => (BORDER_H, false, vec![]),
+            VRow::Border { table, kind, .. } => (l.tables[*table].border_height(*kind), false, vec![]),
             VRow::Gap(h) => (*h, false, vec![]),
         };
+        vrow_h[v] = height;
         if v > 0 {
             for &li in &line_ids {
                 let (s, e) = (l.lines[li].start, l.lines[li].end);
@@ -1495,6 +1653,37 @@ fn paginate_pass(doc: &Document, l: &mut Layout, m: &dyn Metrics, keep: &[bool],
             notes_h += row_notes_h;
             page_notes[page as usize - 1].extend(row_notes);
         }
+        // a table continues on this page: room for its header rows
+        if v > 0 && (brk || first_on_page) && flow.is_none() {
+            if let Some((t, row)) = vrow_tbl[v] {
+                let n = l.tables[t].header_rows;
+                let border = match &l.vrows[v] {
+                    VRow::Border { kind, .. } => Some(*kind),
+                    _ => None,
+                };
+                // (not in front of the header rows themselves, nor when
+                // only the bottom line of the table is left)
+                let wanted = n > 0
+                    && match border {
+                        None => row >= n,
+                        Some(BorderKind::Mid) => row > n,
+                        Some(_) => false,
+                    };
+                if let (true, Some(&first), Some(&end)) = (wanted, tbl_top_v.get(&t), tbl_hdr_v.get(&t)) {
+                    // in front of a line between two rows that line closes
+                    // the header rows, too
+                    let last = if border.is_some() { end - 1 } else { end };
+                    let h = vrow_y[last] + vrow_h[last] - vrow_y[first];
+                    let room = body_bottom(&hf, page, bottom, page_h) - notes_h - y;
+                    // (the header rows must stand on one page themselves
+                    // and leave room for text below them)
+                    if end < v && last > first && vrow_page[first] == vrow_page[last] && h > 0 && h + height <= room {
+                        tbl_repeats.push(TblRepeat { table: t, page, y, first_v: first, last_v: last });
+                        y += h;
+                    }
+                }
+            }
+        }
         vrow_y[v] = y;
         vrow_page[v] = page;
         vrow_drow[v] = drows.len();
@@ -1551,6 +1740,7 @@ fn paginate_pass(doc: &Document, l: &mut Layout, m: &dyn Metrics, keep: &[bool],
     l.drows = drows;
     l.vrow_drow = vrow_drow;
     l.page_paper = page_paper;
+    l.tbl_repeats = tbl_repeats;
     crate::columns::regroup(l);
     None
 }
@@ -1593,5 +1783,54 @@ mod tests {
         let l = layout(&d, &MonoMetrics);
         assert!(l.pages >= 3, "pages={}", l.pages);
         assert_eq!(l.lines[54].page, 2);
+    }
+
+    #[test]
+    fn table_position() {
+        // margins 1" and 7.5"; a table of 2" + 1"
+        let cols = [2400, 1200];
+        assert_eq!(table_columns(&cols, TblPos::Left, 1200, 9000), vec![1200, 3600, 4800]);
+        assert_eq!(table_columns(&cols, TblPos::Right, 1200, 9000), vec![5400, 7800, 9000]);
+        assert_eq!(table_columns(&cols, TblPos::Center, 1200, 9000), vec![3300, 5700, 6900]);
+        assert_eq!(table_columns(&cols, TblPos::Full, 1200, 9000), vec![1200, 6400, 9000]);
+        assert_eq!(table_columns(&cols, TblPos::Set(600), 1200, 9000), vec![600, 3000, 4200]);
+        // wider than the margins: it starts at the left margin; Full shrinks it
+        let wide = [6000, 6000];
+        assert_eq!(table_columns(&wide, TblPos::Right, 1200, 9000)[0], 1200);
+        assert_eq!(table_columns(&wide, TblPos::Center, 1200, 9000)[0], 1200);
+        assert_eq!(table_columns(&wide, TblPos::Full, 1200, 9000), vec![1200, 5100, 9000]);
+    }
+
+    #[test]
+    fn table_lines_and_spacing() {
+        let mut d = Document::new();
+        d.els = crate::tables::new_table(2, 2, 4800);
+        d.els.extend("after".chars().map(El::Ch));
+        let plain = layout(&d, &MonoMetrics);
+        let g = &plain.tables[0];
+        assert_eq!((g.style_v(0, 0), g.style_v(0, 1), g.style_v(1, 2)), (LineStyle::Double, LineStyle::Single, LineStyle::Double));
+        assert_eq!((g.line_above(0, 0), g.line_above(1, 1), g.line_above(2, 0)), (LineStyle::Double, LineStyle::Single, LineStyle::Double));
+        assert!(!g.shaded(0, 0) && g.gray == 10 && g.header_rows == 0);
+        // [Tbl Opt] behind [Tbl Def] and [Cell Lines] behind a [Cell] make
+        // no line of their own
+        let opt = TblOpt { pad: [240, 120, 100, 50], header_rows: 1, gray: 20, ..Default::default() };
+        d.els.insert(1, El::Code(Code::TblOpt(opt)));
+        let fmt = CellFmt { lines: [Some(LineStyle::Thick), None, Some(LineStyle::None), Some(LineStyle::Dotted)], shade: true };
+        d.els.insert(4, El::Code(Code::CellFmt(fmt)));
+        let l = layout(&d, &MonoMetrics);
+        assert_eq!(l.lines.len(), plain.lines.len());
+        assert_eq!(l.vrows.len(), plain.vrows.len());
+        let g = &l.tables[0];
+        assert_eq!((g.style_v(0, 0), g.line_above(0, 0), g.line_above(1, 0), g.line_above(0, 1)), (LineStyle::Thick, LineStyle::None, LineStyle::Dotted, LineStyle::Double));
+        assert!(g.rule_v(0, 0) && g.rule_h(0, 0) && g.rule_v(0, 1));
+        assert!(g.shaded(0, 0) && !g.shaded(0, 1) && g.gray == 20 && g.header_rows == 1);
+        // spacing: text 0.2" from the left line; borders are higher by the
+        // spacing above and below the text
+        assert_eq!(l.lines[0].caret[0].1, g.x[0] + 240);
+        assert_eq!(l.lines[0].right, g.x[1] - 120);
+        assert_eq!((g.border_height(BorderKind::Top), g.border_height(BorderKind::Mid), g.border_height(BorderKind::Bottom)), (160, 210, 110));
+        assert_eq!((g.rule_offset(BorderKind::Top), g.rule_offset(BorderKind::Mid)), (30, 80));
+        let (a, b) = (plain.lines.last().unwrap(), l.lines.last().unwrap());
+        assert_eq!(b.y, a.y + 100 + 150 + 50);
     }
 }

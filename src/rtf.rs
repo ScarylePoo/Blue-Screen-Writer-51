@@ -231,6 +231,9 @@ pub(crate) struct TableState {
     pub rows_done: usize,
     /// per row, per cell: `MRG_*` flags of joined cells (RTF only)
     pub merge: Vec<Vec<u8>>,
+    /// lines, shading and options found for the open table (RTF only),
+    /// stored when it closes — see `fmt_build::apply_table_in`
+    pub info: crate::fmt_build::TableIn,
 }
 
 /// `\clmgf`, `\clmrg`, `\clvmgf`, `\clvmrg`: first / further cell of a
@@ -255,6 +258,7 @@ impl TableState {
             self.pending_cell = false;
             self.rows_done = 0;
             self.merge.clear();
+            self.info = crate::fmt_build::TableIn { unstated_none: true, ..Default::default() };
         } else if !intbl && self.in_tbl {
             self.close(els, text_width);
         }
@@ -311,6 +315,29 @@ impl TableState {
             }
         }
         self.joins(els);
+        crate::fmt_build::apply_table_in(els, self.def_at, &std::mem::take(&mut self.info));
+    }
+
+    /// What the definition of the row that is about to end says (before
+    /// `row_end`): its cells, whether it is a header row, and — taken
+    /// from the first row — position and cell spacing of the table.
+    pub fn row_fmt(&mut self, cells: &[crate::fmt_build::CellIn], header: bool, pos: Option<TblPos>, pad: [Option<i32>; 4]) {
+        if !self.in_tbl {
+            return;
+        }
+        let r = self.rows_done;
+        for (c, x) in cells.iter().enumerate() {
+            if *x != Default::default() {
+                *self.info.cell(r, c) = *x;
+            }
+        }
+        if header && self.info.header_rows == r {
+            self.info.header_rows = r + 1;
+        }
+        if r == 0 {
+            self.info.pos = pos;
+            self.info.pad = pad;
+        }
     }
 
     /// The merge flags of the row that is about to end (before `row_end`).
@@ -363,6 +390,27 @@ impl TableState {
     }
 }
 
+/// The colour table of an RTF file: `{\colortbl;\red…\green…\blue…;…}`
+/// (an empty entry = "auto").
+fn color_table(data: &[u8]) -> Vec<Option<(u8, u8, u8)>> {
+    let key = b"{\\colortbl";
+    let Some(at) = data.windows(key.len()).position(|w| w == key) else { return vec![] };
+    let body = &data[at + key.len()..];
+    let end = body.iter().position(|b| *b == b'}').unwrap_or(body.len());
+    let text = String::from_utf8_lossy(&body[..end]);
+    let mut out = vec![];
+    let mut parts: Vec<&str> = text.split(';').collect();
+    parts.pop(); // what follows the last ';'
+    for entry in parts.into_iter().take(1024) {
+        let val = |k: &str| entry.split(k).nth(1).map(|v| v.chars().take_while(|c| c.is_ascii_digit()).collect::<String>()).and_then(|v| v.parse::<u32>().ok()).map(|v| v.min(255) as u8);
+        out.push(match (val("\\red"), val("\\green"), val("\\blue")) {
+            (Some(r), Some(g), Some(b)) => Some((r, g, b)),
+            _ => None,
+        });
+    }
+    out
+}
+
 /// Column widths (WPU) from cell right boundaries in twips.
 pub(crate) fn widths_from_bounds(bounds: &[i32], left: i32) -> Vec<i32> {
     let mut prev = left;
@@ -405,6 +453,23 @@ struct Parser<'a> {
     cellmrg: Vec<u8>,
     mrg: u8,
     trleft: i32,
+    /// the colour table (for the fill of table cells)
+    colors: Vec<Option<(u8, u8, u8)>>,
+    /// the cells defined so far in the current row definition, and what
+    /// is known about the next one (lines, `\clshdng`, `\clcbpat`)
+    cellin: Vec<crate::fmt_build::CellIn>,
+    cell_cur: crate::fmt_build::CellIn,
+    cell_shdng: i32,
+    cell_cbpat: i32,
+    /// the side of the cell the next `\brdr…` words describe
+    brdr_side: Option<usize>,
+    /// row definition: `\trhdr`, `\trqc` / `\trqr`, 100 % wide,
+    /// `\trgaph`, `\trpaddl` … `\trpaddb`
+    tr_hdr: bool,
+    tr_just: Option<TblPos>,
+    tr_full: (i32, i32),
+    tr_gaph: Option<i32>,
+    tr_padd: [Option<i32>; 4],
     rev_authors: Vec<String>,
     rev_name: String,
 }
@@ -855,7 +920,52 @@ impl<'a> Parser<'a> {
                 self.cellmrg.clear();
                 self.mrg = 0;
                 self.trleft = 0;
+                self.cellin.clear();
+                self.cell_cur = Default::default();
+                (self.cell_shdng, self.cell_cbpat, self.brdr_side) = (0, 0, None);
+                (self.tr_hdr, self.tr_just, self.tr_full, self.tr_gaph, self.tr_padd) = (false, None, (0, 0), None, [None; 4]);
             }
+            // ---- table lines, shading and options
+            "trhdr" => self.tr_hdr = on,
+            "trql" => self.tr_just = None,
+            "trqc" => self.tr_just = Some(TblPos::Center),
+            "trqr" => self.tr_just = Some(TblPos::Right),
+            "trftsWidth" => self.tr_full.0 = p.unwrap_or(0),
+            "trwWidth" => self.tr_full.1 = p.unwrap_or(0),
+            "trgaph" => self.tr_gaph = p,
+            "trpaddl" => self.tr_padd[0] = p,
+            "trpaddr" => self.tr_padd[1] = p,
+            "trpaddt" => self.tr_padd[2] = p,
+            "trpaddb" => self.tr_padd[3] = p,
+            "clbrdrl" | "clbrdrr" | "clbrdrt" | "clbrdrb" => {
+                let k = ["clbrdrl", "clbrdrr", "clbrdrt", "clbrdrb"].iter().position(|w| *w == word).unwrap_or(0);
+                self.brdr_side = Some(k);
+                self.cell_cur.lines[k] = Some(LineStyle::None);
+            }
+            // borders of something else (paragraph, row, page)
+            "brdrt" | "brdrb" | "brdrl" | "brdrr" | "brdrbtw" | "brdrbar" | "box" | "chbrdr" | "trbrdrt" | "trbrdrb" | "trbrdrl" | "trbrdrr" | "trbrdrh"
+            | "trbrdrv" | "cldglu" | "cldgll" | "pgbrdrt" | "pgbrdrb" | "pgbrdrl" | "pgbrdrr" => self.brdr_side = None,
+            "brdrs" | "brdrth" | "brdrdb" | "brdrdot" | "brdrdash" | "brdrdashsm" | "brdrdashd" | "brdrdashdd" | "brdrhair" | "brdrnone" | "brdrnil"
+            | "brdrtbl" | "brdrtriple" | "brdrtnthsg" | "brdrthtnsg" | "brdrtnthtnsg" | "brdrw" => {
+                if let Some(k) = self.brdr_side {
+                    let cur = self.cell_cur.lines[k].unwrap_or(LineStyle::None);
+                    self.cell_cur.lines[k] = Some(match word {
+                        "brdrs" | "brdrhair" => LineStyle::Single,
+                        "brdrth" => LineStyle::Thick,
+                        "brdrdot" => LineStyle::Dotted,
+                        "brdrnone" | "brdrnil" | "brdrtbl" => LineStyle::None,
+                        // the width (twips) tells the solid lines apart
+                        "brdrw" => match cur {
+                            LineStyle::Single | LineStyle::Thick | LineStyle::ExtraThick if p.unwrap_or(0) > 0 => crate::fmt_build::solid_by_width(p.unwrap_or(0) as f64 / 20.0),
+                            other => other,
+                        },
+                        w if w.starts_with("brdrdash") => LineStyle::Dashed,
+                        _ => LineStyle::Double,
+                    });
+                }
+            }
+            "clshdng" => self.cell_shdng = p.unwrap_or(0),
+            "clcbpat" => self.cell_cbpat = p.unwrap_or(0),
             "clmgf" => self.mrg |= MRG_HF,
             "clmrg" => self.mrg |= MRG_H,
             "clvmgf" => self.mrg |= MRG_VF,
@@ -865,7 +975,18 @@ impl<'a> Parser<'a> {
                 if self.cellx.len() < 64 {
                     self.cellx.push(p.unwrap_or(0));
                     self.cellmrg.push(self.mrg);
+                    // fill: a pattern of black on white in 1/100 %, or a
+                    // background colour of the colour table
+                    let mut cell = std::mem::take(&mut self.cell_cur);
+                    cell.fill = if self.cell_shdng > 0 {
+                        Some((self.cell_shdng / 100).clamp(1, 100) as u8)
+                    } else {
+                        self.colors.get(self.cell_cbpat.max(0) as usize).copied().flatten().and_then(|(r, g, b)| crate::fmt_build::gray_of_rgb(r, g, b))
+                    };
+                    self.cellin.push(cell);
                 }
+                self.cell_cur = Default::default();
+                (self.cell_shdng, self.cell_cbpat, self.brdr_side) = (0, 0, None);
                 self.mrg = 0;
             }
             "cell" => {
@@ -884,7 +1005,29 @@ impl<'a> Parser<'a> {
                 if self.st.dest == Dest::Text {
                     let cols = widths_from_bounds(&self.cellx, self.trleft);
                     let mrg = self.cellmrg.clone();
+                    let cells = self.cellin.clone();
+                    let twip = |v: i32| (v as i64 * 1200 / 1440) as i32;
+                    // position: centred / right, as wide as the text, or
+                    // moved in from the left margin (a small \trleft only
+                    // lines the cell text up with the margin)
+                    let pos = if self.tr_just.is_some() {
+                        self.tr_just
+                    } else if self.tr_full == (2, 5000) {
+                        Some(TblPos::Full)
+                    } else if self.trleft.abs() > 180 {
+                        Some(TblPos::Set((self.init.left + twip(self.trleft)).max(0)))
+                    } else {
+                        None
+                    };
+                    let mut pad = self.tr_padd.map(|v| v.map(twip));
+                    if pad.iter().all(|v| v.is_none()) {
+                        if let Some(g) = self.tr_gaph {
+                            (pad[0], pad[1]) = (Some(twip(g)), Some(twip(g)));
+                        }
+                    }
+                    let hdr = self.tr_hdr;
                     let t = self.target();
+                    t.tbl.row_fmt(&cells, hdr, pos, pad);
                     t.tbl.row_merge(&mrg);
                     t.tbl.row_end(&mut t.els, &cols);
                     t.para_started = false;
@@ -1089,6 +1232,17 @@ pub fn read(bytes: &[u8]) -> Result<Document, String> {
         cellmrg: vec![],
         mrg: 0,
         trleft: 0,
+        colors: color_table(bytes),
+        cellin: vec![],
+        cell_cur: Default::default(),
+        cell_shdng: 0,
+        cell_cbpat: 0,
+        brdr_side: None,
+        tr_hdr: false,
+        tr_just: None,
+        tr_full: (0, 0),
+        tr_gaph: None,
+        tr_padd: [None; 4],
         rev_authors: vec![],
         rev_name: String::new(),
     };
@@ -1155,6 +1309,52 @@ pub(crate) mod tests {
         assert_eq!(b.els.iter().filter(|e| matches!(e, El::Code(Code::Join { .. }))).count(), a.els.iter().filter(|e| matches!(e, El::Code(Code::Join { .. }))).count());
         assert_eq!(table_text(&b.els), table_text(&a.els));
         assert_eq!(b.plain_text(0, b.len()).trim_end(), a.plain_text(0, a.len()).trim_end());
+    }
+
+    #[test]
+    fn table_lines_and_options_roundtrip() {
+        use crate::fmt_build::testkit::*;
+        for pos in POSITIONS {
+            let d = lines_doc(some_opt(pos));
+            let r = crate::export::to_rtf(&d);
+            // rows are defined twice (before and after their cells)
+            assert_eq!(r.matches("\\trhdr").count(), 2 * 2, "{r}");
+            assert_eq!(r.matches("\\clcbpat2").count(), 2 * 2, "{r}");
+            assert!(r.contains("{\\colortbl;\\red192\\green0\\blue0;\\red191\\green191\\blue191;}"), "{r}");
+            assert!(r.contains("\\clbrdrt\\brdrs\\brdrw30\\clbrdrl\\brdrs\\brdrw10") && r.contains("\\clbrdrr\\brdrs\\brdrw60") && r.contains("\\clbrdrl\\brdrnone"), "{r}");
+            assert!(r.contains("\\trgaph144\\trpaddl72\\trpaddr216\\trpaddt36\\trpaddb48\\trpaddfl3"), "{r}");
+            assert_same_look(&d, &read(r.as_bytes()).unwrap());
+        }
+        let d = lines_doc(TblOpt::default());
+        let d2 = read(crate::export::to_rtf(&d).as_bytes()).unwrap();
+        assert_same_look(&d, &d2);
+        assert!(!d2.els.iter().any(|e| matches!(e, El::Code(Code::TblOpt(_)))));
+        // a plain table is written as before and comes back without codes
+        let mut d = Document::new();
+        d.els = crate::tables::new_table(2, 2, 4800);
+        let r = crate::export::to_rtf(&d);
+        assert!(r.contains("\\trowd\\trgaph108\\clbrdrt\\brdrs\\clbrdrl\\brdrs\\clbrdrb\\brdrs\\clbrdrr\\brdrs\\cellx2880"), "{r}");
+        assert!(r.contains("{\\colortbl;\\red192\\green0\\blue0;}") && !r.contains("trhdr") && !r.contains("brdrw"), "{r}");
+        crate::fmt_build::testkit::assert_no_table_codes(&read(r.as_bytes()).unwrap());
+    }
+
+    #[test]
+    fn foreign_table_lines_and_shading() {
+        // as Word writes it: a single grid, the first row a shaded header
+        // row with a thick line below, the table centred
+        let b = "\\clbrdrt\\brdrs\\brdrw10 \\clbrdrl\\brdrs\\brdrw10 \\clbrdrb\\brdrs\\brdrw10 \\clbrdrr\\brdrs\\brdrw10 ";
+        let h = "\\clbrdrt\\brdrs\\brdrw10 \\clbrdrl\\brdrs\\brdrw10 \\clbrdrb\\brdrs\\brdrw45 \\clbrdrr\\brdrs\\brdrw10 \\clcbpat3";
+        let grid = format!("{{\\rtf1{{\\colortbl;\\red255\\green0\\blue0;\\red255\\green255\\blue255;\\red128\\green128\\blue128;}}\\trowd\\trgaph108\\trleft-108{b}\\clcbpat2\\cellx1440{b}\\cellx2880\\pard\\intbl A\\cell B\\cell\\row\\pard E\\par}}");
+        let d = read(grid.as_bytes()).unwrap();
+        crate::fmt_build::testkit::assert_no_table_codes(&d);
+        let w = format!("{{\\rtf1{{\\colortbl;\\red255\\green0\\blue0;\\red255\\green255\\blue255;\\red128\\green128\\blue128;}}\\trowd\\trhdr\\trqc\\trgaph108{h}\\cellx1440{h}\\cellx2880\\pard\\intbl A\\cell B\\cell\\row\\trowd\\trqc\\trgaph108{b}\\cellx1440{b}\\cellx2880\\pard\\intbl c\\cell d\\cell\\row\\pard E\\par}}");
+        let d = read(w.as_bytes()).unwrap();
+        let def = crate::fmt_build::testkit::def_of(&d);
+        assert_eq!(crate::tables::opt_at(&d.els, def), TblOpt { header_rows: 1, pos: TblPos::Center, gray: 50, ..Default::default() });
+        let look = crate::fmt_build::table_look(&d.els, &crate::tables::parse(&d.els, def).unwrap());
+        use LineStyle::{ExtraThick, Single};
+        assert_eq!(look.cells[0][0], crate::fmt_build::CellLook { lines: [Single, Single, Single, ExtraThick], shade: true });
+        assert_eq!(look.cells[1][1], crate::fmt_build::CellLook { lines: [Single, Single, ExtraThick, Single], shade: false });
     }
 
     #[test]

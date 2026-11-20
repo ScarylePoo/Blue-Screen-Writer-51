@@ -317,7 +317,7 @@ fn markdown_loses(doc: &Document) -> bool {
     doc.els.iter().chain(doc.initial_codes.iter()).any(|e| match e {
         El::Code(Code::Font(f)) => !typewriter(f),
         El::Code(
-            Code::LRMargin { .. } | Code::LineSpacing(_) | Code::TabSet(_) | Code::Center | Code::FlushRight | Code::ColDef { .. } | Code::HeadFoot { .. } | Code::GBox(_) | Code::Join { .. },
+            Code::LRMargin { .. } | Code::LineSpacing(_) | Code::TabSet(_) | Code::Center | Code::FlushRight | Code::ColDef { .. } | Code::HeadFoot { .. } | Code::GBox(_) | Code::Join { .. } | Code::TblOpt(_) | Code::CellFmt(_),
         ) => true,
         _ => false,
     })
@@ -2105,13 +2105,48 @@ pub fn scroll_into_view(e: &mut Editor, rows: usize, cols: i32) {
 }
 
 /// Text-mode table border row: ╔═══╤═══╗ / ╟───┼───╢ / ╚═══╧═══╝
-fn border_chars(kind: crate::layout::BorderKind) -> (char, char, char, char) {
-    use crate::layout::BorderKind::*;
-    match kind {
-        Top => ('╔', '═', '╤', '╗'),
-        Mid => ('╟', '─', '┼', '╢'),
-        Bottom => ('╚', '═', '╧', '╝'),
+/// The character a table line is drawn with on the edit screen.
+pub fn line_char(style: LineStyle, horizontal: bool) -> char {
+    let (h, v) = match style {
+        LineStyle::None => (' ', ' '),
+        LineStyle::Single => ('─', '│'),
+        LineStyle::Double => ('═', '║'),
+        LineStyle::Dashed => ('╌', '╎'),
+        LineStyle::Dotted => ('┈', '┊'),
+        LineStyle::Thick => ('━', '┃'),
+        LineStyle::ExtraThick => ('▬', '▮'),
+    };
+    if horizontal { h } else { v }
+}
+
+/// The character where table lines meet: the lines to the left, to the
+/// right, above and below.  Single and double lines get their proper box
+/// character; the other kinds are drawn like single lines where they meet
+/// another line.
+pub fn junction_char(l: LineStyle, r: LineStyle, u: LineStyle, d: LineStyle) -> char {
+    let none = LineStyle::None;
+    // a line that only passes through keeps its own character
+    if u == none && d == none {
+        return line_char(if l == none { r } else { l }, true);
     }
+    if l == none && r == none {
+        return line_char(if u == none { d } else { u }, false);
+    }
+    let double = |a: LineStyle, b: LineStyle| (a == LineStyle::Double || b == LineStyle::Double) as usize;
+    // horizontal single/double × vertical single/double
+    let k = double(l, r) + 2 * double(u, d);
+    let arms = [l != none, r != none, u != none, d != none];
+    BOX_SETS.iter().find(|(a, _)| *a == arms).map(|(_, set)| set[k]).unwrap_or('┼')
+}
+
+/// Background of a shaded table cell: the normal background, a quarter
+/// of the way to the text colour.
+fn shade_bg(st: Style) -> Rgb {
+    let mix = |sh: u32| {
+        let (b, f) = ((st.bg.0 >> sh) & 255, (st.fg.0 >> sh) & 255);
+        ((b * 3 + f) / 4) << sh
+    };
+    Rgb(mix(16) | mix(8) | mix(0))
 }
 
 impl Wp {
@@ -2329,16 +2364,15 @@ impl Wp {
                         use crate::layout::BorderKind;
                         let geom = &lay.tables[*table];
                         let xs = &geom.x;
-                        let (l0, h, mid, r0) = border_chars(*kind);
                         let last = xs.len() - 1;
-                        // is there a rule: above / below boundary k, and
-                        // under column c of the row above (joined cells
-                        // have no rules inside)
-                        let up = |k: usize| *kind != BorderKind::Top && geom.rule_v(*trow - 1, k);
-                        let down = |k: usize| *kind != BorderKind::Bottom && geom.rule_v(*trow, k);
-                        let seg = |c: usize| *kind != BorderKind::Mid || geom.rule_h(*trow - 1, c);
+                        // the lines that meet at boundary k: above and
+                        // below it, and the piece of this border over
+                        // column c (joined cells have no lines inside)
+                        let up = |k: usize| if *kind != BorderKind::Top { geom.style_v(*trow - 1, k) } else { LineStyle::None };
+                        let down = |k: usize| if *kind != BorderKind::Bottom { geom.style_v(*trow, k) } else { LineStyle::None };
+                        let seg = |c: usize| geom.line_above(*trow, c);
                         for c in 0..last {
-                            let ch = if seg(c) { h } else { ' ' };
+                            let ch = line_char(seg(c), true);
                             for col in xs[c] / COL_WPU - left..=xs[c + 1] / COL_WPU - left {
                                 if col >= 0 && (col as usize) < g.cols {
                                     g.put(col as usize, row, ch, th.normal);
@@ -2348,33 +2382,9 @@ impl Wp {
                         for (k, x) in xs.iter().enumerate() {
                             let c = x / COL_WPU - left;
                             if c >= 0 && (c as usize) < g.cols {
-                                let ch = if k == 0 {
-                                    if seg(0) { l0 } else { '║' }
-                                } else if k == last {
-                                    if seg(last - 1) { r0 } else { '║' }
-                                } else {
-                                    match *kind {
-                                        BorderKind::Top => if down(k) { mid } else { h },
-                                        BorderKind::Bottom => if up(k) { mid } else { h },
-                                        BorderKind::Mid => match (up(k), down(k), seg(k - 1), seg(k)) {
-                                            (true, true, true, true) => '┼',
-                                            (true, true, false, false) => '│',
-                                            (false, false, true, true) => '─',
-                                            (true, false, true, true) => '┴',
-                                            (false, true, true, true) => '┬',
-                                            (true, true, false, true) => '├',
-                                            (true, true, true, false) => '┤',
-                                            (true, false, false, true) => '└',
-                                            (true, false, true, false) => '┘',
-                                            (false, true, false, true) => '┌',
-                                            (false, true, true, false) => '┐',
-                                            (false, false, true, false) | (false, false, false, true) => '─',
-                                            (true, false, false, false) | (false, true, false, false) => '│',
-                                            (false, false, false, false) => ' ',
-                                        },
-                                    }
-                                };
-                                g.put(c as usize, row, ch, th.normal);
+                                let l = if k > 0 { seg(k - 1) } else { LineStyle::None };
+                                let r = if k < last { seg(k) } else { LineStyle::None };
+                                g.put(c as usize, row, junction_char(l, r, up(k), down(k)), th.normal);
                             }
                         }
                     }
@@ -2390,16 +2400,17 @@ impl Wp {
                                 _ => None,
                             })
                         });
-                        if let Some((t, trow)) = tbl.filter(|t| t.0 != usize::MAX) {
-                            let xs = &lay.tables[t].x;
-                            for (k, x) in xs.iter().enumerate() {
-                                if !lay.tables[t].rule_v(trow, k) {
+                        let tbl = tbl.filter(|t| t.0 != usize::MAX);
+                        if let Some((t, trow)) = tbl {
+                            let geom = &lay.tables[t];
+                            for (k, x) in geom.x.iter().enumerate() {
+                                let style = geom.style_v(trow, k);
+                                if style == LineStyle::None {
                                     continue;
                                 }
                                 let c = x / COL_WPU - left;
                                 if c >= 0 && (c as usize) < g.cols {
-                                    let ch = if k == 0 || k == xs.len() - 1 { '║' } else { '│' };
-                                    g.put(c as usize, row, ch, th.normal);
+                                    g.put(c as usize, row, line_char(style, false), th.normal);
                                 }
                             }
                         }
@@ -2410,6 +2421,26 @@ impl Wp {
                                 let (cc, _) = l.caret_of(e.cursor);
                                 let x = (cc - left).clamp(0, g.cols as i32 - 1) as usize;
                                 cursor_screen = Some((x, row));
+                            }
+                        }
+                        // shaded cells: a lighter background between their lines
+                        if let Some((t, trow)) = tbl {
+                            let geom = &lay.tables[t];
+                            let shade = shade_bg(th.normal);
+                            for c in 0..geom.x.len() - 1 {
+                                if !geom.shaded(trow, c) {
+                                    continue;
+                                }
+                                // (up to its right line, or into the next
+                                // column where a joined cell goes on)
+                                let from = geom.x[c] / COL_WPU - left + geom.rule_v(trow, c) as i32;
+                                let to = geom.x[c + 1] / COL_WPU - left - geom.rule_v(trow, c + 1) as i32;
+                                for col in from.max(0)..=to.min(g.cols as i32 - 1) {
+                                    let cell = &mut g.cells[row * g.cols + col as usize];
+                                    if cell.bg == th.normal.bg {
+                                        cell.bg = shade;
+                                    }
+                                }
                             }
                         }
                     }

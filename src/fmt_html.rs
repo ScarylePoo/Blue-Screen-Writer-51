@@ -380,6 +380,14 @@ struct TableCtx {
     widths: Vec<i32>,
     col_widths: Vec<i32>,
     width_ok: bool,
+    /// lines, shading and options (see `fmt_build::apply_table_in`)
+    tin: crate::fmt_build::TableIn,
+    /// `border=1` on the table: a line around every cell
+    grid: bool,
+    /// inside <thead>
+    thead: bool,
+    /// background of the current row
+    row_fill: Option<u8>,
 }
 
 struct Conv {
@@ -570,6 +578,11 @@ impl Conv {
                 }
             }
             "table" => self.end_table(),
+            "thead" => {
+                if let Some(t) = self.tables.last_mut() {
+                    t.thead = false;
+                }
+            }
             "ul" | "ol" => {
                 self.lists.pop();
                 self.block_break();
@@ -622,7 +635,7 @@ impl Conv {
                 }
             }
         }
-        self.b.table_end();
+        self.b.table_end_with(&t.tin);
         self.space = false;
     }
 
@@ -815,14 +828,49 @@ impl Conv {
                 let before = self.b.els.len();
                 self.b.table_start(vec![]);
                 let def_at = (self.b.els.len() > before && matches!(self.b.els.last(), Some(El::Code(Code::TblDef { .. })))).then(|| self.b.els.len() - 1);
-                self.tables.push(TableCtx { def_at, rows: 0, in_cell: false, span_extra: 0, col: 0, down: vec![], down_new: vec![], widths: vec![], col_widths: vec![], width_ok: true });
+                // lines: border=1 draws a line around every cell, a CSS
+                // border of the table is its frame.  Position: align /
+                // auto margins, a left margin, or as wide as the text.
+                // Spacing: cellpadding (else the padding of the first cell).
+                let mut tin = crate::fmt_build::TableIn { unstated_none: true, ..Default::default() };
+                let grid = attr(attrs, "border").is_some_and(|b| b.trim().parse::<f64>().map_or(b.trim().is_empty(), |n| n > 0.0));
+                let all = sty("border").and_then(crate::fmt_build::css_border);
+                for (k, side) in ["left", "right", "top", "bottom"].iter().enumerate() {
+                    tin.frame[k] = sty(&format!("border-{side}")).and_then(crate::fmt_build::css_border).or(all);
+                }
+                let auto = |k: &str| sty(k).is_some_and(|v| v == "auto");
+                let width = attr(attrs, "width").map(|w| w.trim().to_string()).or(sty("width").map(String::from));
+                tin.pos = match attr(attrs, "align").map(|a| a.trim().to_ascii_lowercase()).as_deref() {
+                    Some("center") => Some(TblPos::Center),
+                    Some("right") => Some(TblPos::Right),
+                    _ if auto("margin-left") && auto("margin-right") => Some(TblPos::Center),
+                    _ if sty("margin").is_some_and(|m| m.split_whitespace().nth(1).or(m.split_whitespace().next()) == Some("auto") && m.split_whitespace().count() <= 3) => Some(TblPos::Center),
+                    _ if auto("margin-left") => Some(TblPos::Right),
+                    _ if width.as_deref() == Some("100%") => Some(TblPos::Full),
+                    _ => sty("margin-left").and_then(|m| length_wpu(m, 7800)).filter(|m| *m > 20).map(|m| TblPos::Set(InitialFormat::default().left + m)),
+                };
+                if let Some(p) = attr(attrs, "cellpadding").and_then(|p| length_wpu(p, 0)).or(attr(attrs, "cellpadding").filter(|p| p.trim() == "0").map(|_| 0)) {
+                    tin.pad = [Some(p); 4];
+                }
+                self.tables.push(TableCtx { def_at, rows: 0, in_cell: false, span_extra: 0, col: 0, down: vec![], down_new: vec![], widths: vec![], col_widths: vec![], width_ok: true, tin, grid, thead: false, row_fill: None });
+            }
+            "thead" | "tbody" | "tfoot" if !skipping => {
+                if let Some(t) = self.tables.last_mut() {
+                    t.thead = name == "thead";
+                }
             }
             "tr" if !skipping && !self.tables.is_empty() => {
                 self.flush_spans(true);
                 self.b.row();
+                let fill = attr(attrs, "bgcolor").or(sty("background-color")).or(sty("background")).and_then(crate::fmt_build::css_gray);
                 if let Some(t) = self.tables.last_mut() {
                     t.rows += 1;
                     t.in_cell = false;
+                    t.row_fill = fill;
+                    // header rows: the rows of <thead> at the top of the table
+                    if t.thead && t.tin.header_rows == t.rows - 1 {
+                        t.tin.header_rows = t.rows;
+                    }
                 }
             }
             "td" | "th" if !skipping && !self.tables.is_empty() => {
@@ -838,7 +886,33 @@ impl Conv {
                 let down: usize = attr(attrs, "rowspan").and_then(|s| s.trim().parse().ok()).unwrap_or(1).clamp(1, 255);
                 self.b.join(span, down);
                 let w = attr(attrs, "width").or(sty("width")).and_then(|w| length_wpu(w, 7800));
+                // lines and background of the cell
+                let mut cell = crate::fmt_build::CellIn::default();
+                let all = sty("border").and_then(crate::fmt_build::css_border);
+                for (k, side) in ["left", "right", "top", "bottom"].iter().enumerate() {
+                    cell.lines[k] = sty(&format!("border-{side}")).and_then(crate::fmt_build::css_border).or(all);
+                }
+                let fill = attr(attrs, "bgcolor").or(sty("background-color")).or(sty("background")).map(crate::fmt_build::css_gray);
+                // padding: 1 to 4 values (top, right, bottom, left)
+                let pad: Vec<Option<i32>> = sty("padding").map(|p| p.split_whitespace().map(|v| if v.trim_end_matches(|c: char| c.is_ascii_alphabetic()).parse::<f64>() == Ok(0.0) { Some(0) } else { length_wpu(v, 0) }).collect()).unwrap_or_default();
                 if let Some(t) = self.tables.last_mut() {
+                    if t.grid {
+                        for l in cell.lines.iter_mut() {
+                            l.get_or_insert(LineStyle::Single);
+                        }
+                    }
+                    cell.fill = fill.unwrap_or(t.row_fill);
+                    if cell != Default::default() && t.rows > 0 {
+                        *t.tin.cell(t.rows - 1, t.col) = cell;
+                    }
+                    if t.tin.pad.iter().all(|p| p.is_none()) && !pad.is_empty() && pad.iter().all(|p| p.is_some()) && pad.len() <= 4 {
+                        let at = |k: usize| pad[k.min(pad.len() - 1)];
+                        // top, right, bottom, left → ours: left, right, top, bottom
+                        let (top, right) = (at(0), at(1));
+                        let bottom = if pad.len() > 2 { pad[2] } else { top };
+                        let left = if pad.len() > 3 { pad[3] } else { right };
+                        t.tin.pad = [left, right, top, bottom];
+                    }
                     t.in_cell = true;
                     t.span_extra = span - 1;
                     if down > 1 {
@@ -1136,6 +1210,65 @@ mod tests {
         let t = crate::tables::parse(&d3.els, 0).unwrap();
         assert_eq!(t.slots(&d3.els)[2], vec![Slot::Normal, Slot::Covered { r: 0, c: 1 }, Slot::Normal, Slot::Normal]);
         assert_eq!(t.slots(&d3.els)[1][3], Slot::Covered { r: 0, c: 3 });
+    }
+
+    #[test]
+    fn table_lines_and_options_roundtrip() {
+        use crate::fmt_build::testkit::*;
+        for pos in POSITIONS {
+            let d = lines_doc(some_opt(pos));
+            let h = crate::export::to_html(&d);
+            assert!(h.contains("<thead>\n<tr>") && h.contains("</tr>\n</thead>\n<tbody>\n<tr>") && h.contains("</tbody>\n</table>"), "{h}");
+            assert_eq!(h.matches("background-color:#BFBFBF").count(), 2, "{h}");
+            assert!(h.contains("border-left:1px dashed #000;border-right:1px solid #000;border-top:1px dotted #000;border-bottom:1px solid #000;background-color:#BFBFBF;padding:2.4px 14.4px 3.2px 4.8px;"), "{h}");
+            assert!(h.contains("border-left:none;border-right:4px solid #000;border-top:3px double #000"), "{h}");
+            assert_same_look(&d, &rd(&h));
+        }
+        let d = lines_doc(TblOpt::default());
+        let d2 = rd(&crate::export::to_html(&d));
+        assert_same_look(&d, &d2);
+        assert!(!d2.els.iter().any(|e| matches!(e, El::Code(Code::TblOpt(_)))));
+        // a plain table is written as before and comes back without codes
+        let mut d = Document::new();
+        d.els = crate::tables::new_table(2, 2, 4800);
+        let h = crate::export::to_html(&d);
+        assert!(h.contains("<table style=\"border-collapse:collapse\">\n<tr><td style=\"border:1px solid #000;padding:2px 6px;vertical-align:top;width:192px\">"), "{h}");
+        assert!(!h.contains("thead") && !h.contains("border-left") && !h.contains("background"), "{h}");
+        assert_no_table_codes(&rd(&h));
+    }
+
+    #[test]
+    fn foreign_table_lines_shading_and_header() {
+        use LineStyle::{Dashed, Double, Single, Thick};
+        use crate::fmt_build::{CellLook, table_look};
+        // the ordinary grid of a browser: no codes
+        for h in ["<table border=1 cellpadding=4><tr><td bgcolor=white>A<td>B<tr><td>C<td>D</table>", "<table><tr><td style='border:solid windowtext 1.0pt;padding:0cm 5.4pt 0cm 5.4pt'>A<td style='border:1px solid black'>B</table>"] {
+            crate::fmt_build::testkit::assert_no_table_codes(&rd(h));
+        }
+        let d = rd("<table border=\"1\" align=center cellpadding=10>\
+            <thead><tr bgcolor=\"#cccccc\"><th style=\"border-bottom:2px solid black\">Name</th><th style=\"border-bottom: 3px double #000\">Ort</th></tr></thead>\
+            <tbody><tr><td>a</td><td style=\"border-right:none; background-color: rgb(128, 128, 128)\">b</td></tr>\
+            <tr><td style=\"border-top:1px dashed gray\">c</td><td bgcolor=\"#FFFFFF\">d</td></tr></tbody></table><p>Ende");
+        let def = crate::fmt_build::testkit::def_of(&d);
+        // #cccccc is 20 % of black: the first shaded cell gives the gray of the table
+        assert_eq!(crate::tables::opt_at(&d.els, def), TblOpt { header_rows: 1, pad: [125, 125, 125, 125], pos: TblPos::Center, gray: 20, ..Default::default() });
+        let look = table_look(&d.els, &crate::tables::parse(&d.els, def).unwrap());
+        assert_eq!(look.cells[0][0], CellLook { lines: [Single, Single, Single, Thick], shade: true });
+        assert_eq!(look.cells[0][1], CellLook { lines: [Single, Single, Single, Double], shade: true });
+        assert_eq!(look.cells[1][0], CellLook { lines: [Single, Single, Thick, Single], shade: false });
+        assert_eq!(look.cells[1][1], CellLook { lines: [Single, LineStyle::None, Double, Single], shade: true });
+        // a dashed line against the solid one of the cell above: the heavier one shows
+        assert_eq!(look.cells[2][0], CellLook { lines: [Single; 4], shade: false });
+        assert_eq!(look.cells[2][1], CellLook { lines: [Single; 4], shade: false });
+        assert_eq!(debug_text(&d.els), "[Tbl]\n[Row]|Name|Ort\n[Row]|a|b\n[Row]|c|d[TblOff]Ende");
+        // only the lines the cells state are there; without border=1 the rest has none
+        let d = rd("<table style='margin-left:1in'><tr><td style='border-bottom:1px dashed #000'>A<td>B<tr><td>C<td>D</table>");
+        let look = table_look(&d.els, &crate::tables::parse(&d.els, 0).unwrap());
+        assert_eq!(look.cells[0][0].lines, [LineStyle::None, LineStyle::None, LineStyle::None, Dashed]);
+        assert_eq!(look.cells[1][1].lines, [LineStyle::None; 4]);
+        assert_eq!(crate::tables::opt_at(&d.els, 0).pos, TblPos::Set(2400));
+        // as wide as the window
+        assert_eq!(crate::tables::opt_at(&rd("<table width='100%'><tr><td>A</table>").els, 0).pos, TblPos::Full);
     }
 
     #[test]

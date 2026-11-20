@@ -99,6 +99,20 @@ impl Table {
         out
     }
 
+    /// The `[Cell Lines]` code of cell (r, c): (element index, settings).
+    /// Like `[Join]` it sits among the codes at the start of the cell.
+    pub fn fmt_of(&self, els: &[El], r: usize, c: usize) -> Option<(usize, CellFmt)> {
+        let mut i = self.rows[r][c] + 1;
+        while let Some(El::Code(code)) = els.get(i) {
+            match code {
+                Code::CellFmt(f) => return Some((i, *f)),
+                Code::Row | Code::Cell | Code::TblOff | Code::TblDef { .. } | Code::HRt | Code::Tab => break,
+                _ => i += 1,
+            }
+        }
+        None
+    }
+
     fn has_joins(&self, els: &[El]) -> bool {
         els[self.def..self.off.min(els.len())].iter().any(|e| matches!(e, El::Code(Code::Join { .. })))
     }
@@ -143,6 +157,54 @@ pub fn leave_covered(els: &[El], cursor: usize, forward: Option<bool>) -> Option
             None => t.def,
         },
     })
+}
+
+/// The table-wide settings of the table whose `[Tbl Def]` is at `def`
+/// (the `[Tbl Opt]` code right behind it; the defaults without one).
+pub fn opt_at(els: &[El], def: usize) -> TblOpt {
+    match els.get(def + 1) {
+        Some(El::Code(Code::TblOpt(o))) => *o,
+        _ => TblOpt::default(),
+    }
+}
+
+/// Store the table-wide settings: a `[Tbl Opt]` code behind the
+/// `[Tbl Def]`, or none when they are the defaults.  Returns by how much
+/// the elements behind it moved (-1, 0, 1).
+fn write_opt(els: &mut Vec<El>, def: usize, opt: TblOpt) -> isize {
+    let has = matches!(els.get(def + 1), Some(El::Code(Code::TblOpt(_))));
+    match (has, opt.is_default()) {
+        (true, true) => {
+            els.remove(def + 1);
+            -1
+        }
+        (true, false) => {
+            els[def + 1] = El::Code(Code::TblOpt(opt));
+            0
+        }
+        (false, true) => 0,
+        (false, false) => {
+            els.insert(def + 1, El::Code(Code::TblOpt(opt)));
+            1
+        }
+    }
+}
+
+/// Store the lines and shading of cell (r, c): a `[Cell Lines]` code at
+/// the start of the cell (behind its `[Join]`), or none when nothing is
+/// set.  Only elements behind the start of this cell move.
+fn write_fmt(els: &mut Vec<El>, t: &Table, r: usize, c: usize, f: CellFmt) {
+    match (t.fmt_of(els, r, c), f.is_default()) {
+        (Some((i, _)), true) => {
+            els.remove(i);
+        }
+        (Some((i, _)), false) => els[i] = El::Code(Code::CellFmt(f)),
+        (None, true) => {}
+        (None, false) => {
+            let at = t.join_of(els, r, c).map(|j| j.0 + 1).unwrap_or(t.rows[r][c] + 1);
+            els.insert(at, El::Code(Code::CellFmt(f)));
+        }
+    }
 }
 
 /// The table containing position `pos`, if any.
@@ -258,8 +320,20 @@ pub fn is_structure(e: &El) -> bool {
     matches!(e, El::Code(Code::Row | Code::Cell | Code::TblOff))
 }
 
+/// The codes a table is made of: its structure and the settings that
+/// belong to it (joined cells, lines, options).
 fn is_table_code(e: &El) -> bool {
-    matches!(e, El::Code(Code::Row | Code::Cell | Code::TblOff | Code::TblDef { .. }))
+    matches!(e, El::Code(Code::Row | Code::Cell | Code::TblOff | Code::TblDef { .. } | Code::Join { .. } | Code::TblOpt(_) | Code::CellFmt(_)))
+}
+
+/// Is the element before `k` the start of a row or of the table (so that
+/// the code at `k` is the first of its row)?
+fn first_in_row(els: &[El], k: usize) -> bool {
+    let mut p = k;
+    while p > 0 && matches!(els[p - 1], El::Code(Code::TblOpt(_))) {
+        p -= 1;
+    }
+    p > 0 && matches!(els[p - 1], El::Code(Code::Row | Code::TblDef { .. }))
 }
 
 /// For the range `from..to`: which elements are structure codes of a table
@@ -311,7 +385,7 @@ pub fn copy_range(els: &[El], from: usize, to: usize) -> Vec<El> {
             out.push(els[k].clone());
             continue;
         }
-        let first_in_row = k > 0 && matches!(els[k - 1], El::Code(Code::Row | Code::TblDef { .. }));
+        let first_in_row = first_in_row(els, k);
         match &els[k] {
             El::Code(Code::Cell) if !first_in_row && !out.is_empty() => out.push(El::Code(Code::Tab)),
             El::Code(Code::Row) if !first_in_row && !out.is_empty() => out.push(El::Code(Code::HRt)),
@@ -350,6 +424,8 @@ pub fn remove_structure(e: &mut Editor, def: usize) {
                     }
                     continue;
                 }
+                // what only means something in a table goes with it
+                El::Code(Code::Join { .. } | Code::TblOpt(_) | Code::CellFmt(_)) => continue,
                 _ => {}
             }
         }
@@ -433,6 +509,9 @@ fn contents(els: &[El], t: &Table) -> Vec<Vec<Vec<El>>> {
 /// Write the table back from its cell contents.
 fn rebuild(e: &mut Editor, t: &Table, cells: Vec<Vec<Vec<El>>>) {
     let mut v = vec![El::Code(Code::TblDef { cols: t.cols.clone() })];
+    // what stands between [Tbl Def] and the first row stays ([Tbl Opt])
+    let first = t.row_codes.first().copied().unwrap_or(t.off).min(e.doc.els.len());
+    v.extend(e.doc.els[(t.def + 1).min(first)..first].iter().cloned());
     for row in cells {
         v.push(El::Code(Code::Row));
         for cell in row {
@@ -447,36 +526,301 @@ fn rebuild(e: &mut Editor, t: &Table, cells: Vec<Vec<Vec<El>>>) {
     e.relayout();
 }
 
+/// The cells between `a` and `b` (opposite corners): first and last row,
+/// first and last column.  Joined cells that reach into the area belong
+/// to it as a whole.
+fn area(t: &Table, slots: &[Vec<Slot>], a: (usize, usize), b: (usize, usize)) -> (usize, usize, usize, usize) {
+    let (mut r0, mut r1) = (a.0.min(b.0), a.0.max(b.0).min(t.rows.len() - 1));
+    let (mut c0, mut c1) = (a.1.min(b.1), a.1.max(b.1).min(t.cols.len() - 1));
+    loop {
+        let before = (r0, r1, c0, c1);
+        for r in 0..t.rows.len() {
+            for c in 0..t.rows[r].len() {
+                let (ar, ac) = match slots[r][c] {
+                    Slot::Covered { r, c } => (r, c),
+                    _ => (r, c),
+                };
+                let Slot::Anchor { cols, rows } = slots[ar][ac] else { continue };
+                let hit = ar <= r1 && ar + rows > r0 && ac <= c1 && ac + cols > c0;
+                if hit {
+                    r0 = r0.min(ar);
+                    r1 = r1.max(ar + rows - 1);
+                    c0 = c0.min(ac);
+                    c1 = c1.max(ac + cols - 1);
+                }
+            }
+        }
+        if before == (r0, r1, c0, c1) {
+            return before;
+        }
+    }
+}
+
+/// Table Edit, 3 Lines: which lines of the cell (or of the block of cells).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Which {
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Inside,
+    Outside,
+    All,
+}
+
+const WHICH: [Which; 7] = [Which::Left, Which::Right, Which::Top, Which::Bottom, Which::Inside, Which::Outside, Which::All];
+
+/// Table Edit, 3 Lines: give lines of the current cell — or, with Block
+/// on, of the cells from `from` to the current one — the style `style`
+/// (`None`: switch the shading of these cells on or off instead).  For a
+/// block, Left/Right/Top/Bottom/Outside are the edges of the block as a
+/// whole and Inside the lines between its cells.
+///
+/// A line between two cells is stored once: as the `Left` of the cell on
+/// its right or the `Top` of the cell below it (the place the layout looks
+/// first, see `layout::table_rules`), and only at the right and bottom
+/// edge of the table as `Right` / `Bottom`.  A line that gets the default
+/// style is not stored at all.
+fn set_lines(wp: &mut Wp, from: Option<(usize, usize)>, which: Which, style: Option<LineStyle>, shade: bool) {
+    TableEdit::with_table(wp, |e, t, r, c| {
+        let els = &e.doc.els;
+        let slots = t.slots(els);
+        let (r0, r1, c0, c1) = area(&t, &slots, from.unwrap_or((r, c)), (r, c));
+        let (nrows, ncols) = (t.rows.len(), t.cols.len());
+        let owner = |r: usize, c: usize| match slots.get(r).and_then(|row| row.get(c)) {
+            Some(Slot::Covered { r, c }) => Some((*r, *c)),
+            Some(_) => Some((r, c)),
+            None => None,
+        };
+        let mut fmts: std::collections::BTreeMap<(usize, usize), CellFmt> = Default::default();
+        let old = |rc: (usize, usize)| t.fmt_of(els, rc.0, rc.1).map(|x| x.1).unwrap_or_default();
+        match style {
+            None => {
+                for rr in r0..=r1 {
+                    for cc in c0..=c1 {
+                        if let Some(o) = owner(rr, cc) {
+                            fmts.entry(o).or_insert_with(|| old(o)).shade = shade;
+                        }
+                    }
+                }
+            }
+            Some(style) => {
+                // the line at column boundary k beside row rr
+                let mut set_v = |rr: usize, k: usize| {
+                    let left = if k > 0 { owner(rr, k - 1) } else { None };
+                    let right = if k < ncols { owner(rr, k) } else { None };
+                    if left == right {
+                        return; // inside a joined cell
+                    }
+                    let default = if k == 0 || k == ncols { LineStyle::Double } else { LineStyle::Single };
+                    let val = (style != default).then_some(style);
+                    match (left, right) {
+                        (l, Some(o)) => {
+                            fmts.entry(o).or_insert_with(|| old(o)).lines[0] = val;
+                            if let Some(l) = l {
+                                fmts.entry(l).or_insert_with(|| old(l)).lines[1] = None;
+                            }
+                        }
+                        (Some(l), None) => fmts.entry(l).or_insert_with(|| old(l)).lines[1] = val,
+                        (None, None) => {}
+                    }
+                };
+                let (l, rt, tp, bt, inside) = match which {
+                    Which::Left => (true, false, false, false, false),
+                    Which::Right => (false, true, false, false, false),
+                    Which::Top => (false, false, true, false, false),
+                    Which::Bottom => (false, false, false, true, false),
+                    Which::Inside => (false, false, false, false, true),
+                    Which::Outside => (true, true, true, true, false),
+                    Which::All => (true, true, true, true, true),
+                };
+                for rr in r0..=r1 {
+                    for k in c0..=c1 + 1 {
+                        if (k == c0 && l) || (k == c1 + 1 && rt) || (k > c0 && k <= c1 && inside) {
+                            set_v(rr, k);
+                        }
+                    }
+                }
+                // the line in front of row b (0 = top of the table) at column cc
+                let mut set_h = |b: usize, cc: usize| {
+                    let up = if b > 0 { owner(b - 1, cc) } else { None };
+                    let down = if b < nrows { owner(b, cc) } else { None };
+                    if up == down {
+                        return;
+                    }
+                    let default = if b == 0 || b == nrows { LineStyle::Double } else { LineStyle::Single };
+                    let val = (style != default).then_some(style);
+                    match (up, down) {
+                        (u, Some(o)) => {
+                            fmts.entry(o).or_insert_with(|| old(o)).lines[2] = val;
+                            if let Some(u) = u {
+                                fmts.entry(u).or_insert_with(|| old(u)).lines[3] = None;
+                            }
+                        }
+                        (Some(u), None) => fmts.entry(u).or_insert_with(|| old(u)).lines[3] = val,
+                        (None, None) => {}
+                    }
+                };
+                for b in r0..=r1 + 1 {
+                    for cc in c0..=c1 {
+                        if (b == r0 && tp) || (b == r1 + 1 && bt) || (b > r0 && b <= r1 && inside) {
+                            set_h(b, cc);
+                        }
+                    }
+                }
+            }
+        }
+        fmts.retain(|rc, f| *f != old(*rc));
+        if fmts.is_empty() {
+            return;
+        }
+        e.snapshot();
+        // from the last cell backwards: the cells before keep their place
+        for (&(rr, cc), f) in fmts.iter().rev() {
+            write_fmt(&mut e.doc.els, &t, rr, cc, *f);
+        }
+        e.modified = true;
+        e.relayout();
+        if let Some(t) = parse(&e.doc.els, t.def) {
+            goto_cell(e, &t, r, c);
+        }
+    });
+}
+
+/// Table Edit, 4 Header and 6 Options: change the table-wide settings of
+/// the table the cursor is in (one undo step).
+fn change_opt(wp: &mut Wp, f: impl FnOnce(&mut TblOpt)) {
+    TableEdit::with_table(wp, |e, t, r, c| {
+        let old = opt_at(&e.doc.els, t.def);
+        let mut new = old;
+        f(&mut new);
+        if new == old {
+            return;
+        }
+        e.snapshot();
+        write_opt(&mut e.doc.els, t.def, new);
+        if new.neg_paren != old.neg_paren {
+            // results are written again with the other sign
+            crate::math::calc_table(&mut e.doc.els, t.def);
+        }
+        e.modified = true;
+        e.relayout();
+        if let Some(t) = parse(&e.doc.els, t.def) {
+            goto_cell(e, &t, r, c);
+        }
+    });
+}
+
+fn cur_opt(wp: &Wp) -> TblOpt {
+    let e = wp.ed_ref();
+    table_at(&e.doc.els, e.cursor).map(|t| opt_at(&e.doc.els, t.def)).unwrap_or_default()
+}
+
+/// Table Edit, 6 Options: the Table Options screen.  Exit returns to
+/// Table Edit.
+struct TableOptions {
+    form: Box<crate::menus::Form>,
+}
+
+impl Screen for TableOptions {
+    fn full_screen(&self) -> bool {
+        true
+    }
+    fn input(&mut self, wp: &mut Wp, i: &Input) -> Outcome {
+        match self.form.input(wp, i) {
+            Outcome::CloseAll => Outcome::Close,
+            out => out,
+        }
+    }
+    fn draw(&self, wp: &Wp, g: &mut Grid) {
+        self.form.draw(wp, g)
+    }
+}
+
+fn table_options() -> Box<dyn Screen> {
+    use crate::menus::{Edit, Form, Item};
+    use std::rc::Rc;
+    let items = vec![
+        Item {
+            key: '1',
+            labels: vec!["~Spacing Between Text and Lines", "         Left", "         Right", "         Top", "         Bottom"],
+            value: Rc::new(|wp| {
+                let mut v = vec![String::new()];
+                v.extend(cur_opt(wp).pad.iter().map(|p| fmt_inches(*p)));
+                v
+            }),
+            edit: Edit::Fields(Rc::new(|wp, vals| {
+                change_opt(wp, |o| {
+                    for k in 0..4 {
+                        if let Some(m) = vals.get(k + 1).and_then(|s| parse_measure(s)) {
+                            o.pad[k] = m.clamp(0, 1200);
+                        }
+                    }
+                })
+            })),
+        },
+        Item {
+            key: '2',
+            labels: vec!["~Display Negative Results", "         1 = with minus signs", "         2 = with parentheses"],
+            value: Rc::new(|wp| vec![if cur_opt(wp).neg_paren { "2".into() } else { "1".into() }]),
+            edit: Edit::Choice(vec!["Minus Signs", "Parentheses"], Rc::new(|wp, k| change_opt(wp, |o| o.neg_paren = k == 1))),
+        },
+        Item {
+            key: '3',
+            labels: vec!["~Position of Table"],
+            value: Rc::new(|wp| {
+                vec![match cur_opt(wp).pos {
+                    TblPos::Left => "Left".into(),
+                    TblPos::Right => "Right".into(),
+                    TblPos::Center => "Center".into(),
+                    TblPos::Full => "Full".into(),
+                    TblPos::Set(x) => format!("{} from left edge", fmt_inches(x)),
+                }]
+            }),
+            edit: Edit::Choice(
+                vec!["Left", "Right", "Center", "Full", "Set Position"],
+                Rc::new(|wp, k| match k {
+                    4 => {
+                        // where the table stands now
+                        let e = wp.ed_ref();
+                        let now = match cur_opt(wp).pos {
+                            TblPos::Set(x) => x,
+                            _ => e.format_state_at(e.cursor).left,
+                        };
+                        wp.push(Prompt::new("Offset from left edge:", &fmt_inches(now), |wp, s| {
+                            if let Some(x) = s.and_then(|s| parse_measure(&s)) {
+                                change_opt(wp, |o| o.pos = TblPos::Set(x.max(0)));
+                                wp.after_edit();
+                            }
+                            None
+                        }));
+                    }
+                    _ => change_opt(wp, |o| o.pos = [TblPos::Left, TblPos::Right, TblPos::Center, TblPos::Full][k]),
+                }),
+            ),
+        },
+        Item {
+            key: '4',
+            labels: vec!["~Gray Shading (% of black)"],
+            value: Rc::new(|wp| vec![format!("{}%", cur_opt(wp).gray)]),
+            edit: Edit::Fields(Rc::new(|wp, vals| {
+                if let Some(g) = vals.first().and_then(|s| s.trim().trim_end_matches('%').trim().parse::<u32>().ok()) {
+                    change_opt(wp, |o| o.gray = g.min(100) as u8);
+                }
+            })),
+        },
+    ];
+    let mut form = Form::new("Table Options", items);
+    form.headings = true;
+    Box::new(TableOptions { form })
+}
+
 /// Table Edit, 7 Join: the cells from (r0, c0) to (r1, c1) become one.
 /// Their text is collected in the first cell.
 fn join_cells(wp: &mut Wp, a: (usize, usize), b: (usize, usize)) {
     TableEdit::with_table(wp, |e, t, _, _| {
         let slots = t.slots(&e.doc.els);
-        let (mut r0, mut r1) = (a.0.min(b.0), a.0.max(b.0).min(t.rows.len() - 1));
-        let (mut c0, mut c1) = (a.1.min(b.1), a.1.max(b.1).min(t.cols.len() - 1));
-        // joined cells that reach into the area belong to it as a whole
-        loop {
-            let before = (r0, r1, c0, c1);
-            for r in 0..t.rows.len() {
-                for c in 0..t.rows[r].len() {
-                    let (ar, ac) = match slots[r][c] {
-                        Slot::Covered { r, c } => (r, c),
-                        _ => (r, c),
-                    };
-                    let Slot::Anchor { cols, rows } = slots[ar][ac] else { continue };
-                    let hit = ar <= r1 && ar + rows > r0 && ac <= c1 && ac + cols > c0;
-                    if hit {
-                        r0 = r0.min(ar);
-                        r1 = r1.max(ar + rows - 1);
-                        c0 = c0.min(ac);
-                        c1 = c1.max(ac + cols - 1);
-                    }
-                }
-            }
-            if before == (r0, r1, c0, c1) {
-                break;
-            }
-        }
+        let (r0, r1, c0, c1) = area(&t, &slots, a, b);
         if (r0, c0) == (r1, c1) {
             return;
         }
@@ -486,7 +830,8 @@ fn join_cells(wp: &mut Wp, a: (usize, usize), b: (usize, usize)) {
         for r in r0..=r1 {
             for c in c0..=c1.min(cells[r].len().saturating_sub(1)) {
                 let mut cell = std::mem::take(&mut cells[r][c]);
-                cell.retain(|el| !matches!(el, El::Code(Code::Join { .. })));
+                // (the joined cell keeps the lines and shading of its first cell)
+                cell.retain(|el| !matches!(el, El::Code(Code::Join { .. })) && ((r, c) == (r0, c0) || !matches!(el, El::Code(Code::CellFmt(_)))));
                 let has_text = cell.iter().any(|el| !crate::editor::is_invisible(el));
                 if has_text || (r, c) == (r0, c0) {
                     if joined.iter().any(|el| !crate::editor::is_invisible(el)) && has_text {
@@ -882,6 +1227,36 @@ impl Screen for TableEdit {
                     }) as Box<dyn Screen>)
                 }).prefix("Format: "));
             }
+            Input::Char('3') | Input::Char('l') | Input::Char('L') => {
+                // (the block ends with the menu, as with Join)
+                let from = self.block.take();
+                wp.ed().block_anchor = None;
+                return Outcome::Push(MenuLine::new(&["~Left", "~Right", "~Top", "~Bottom", "~Inside", "~Outside", "~All", "~Shade"], move |_wp, k| {
+                    if k == 7 {
+                        return Some(MenuLine::new(&["~On", "O~ff"], move |wp, on| {
+                            set_lines(wp, from, Which::All, None, on == 0);
+                            wp.after_edit();
+                            None
+                        }).prefix("Shade: ") as Box<dyn Screen>);
+                    }
+                    Some(MenuLine::new(&["~None", "~Single", "~Double", "D~ashed", "D~otted", "~Thick", "~Extra Thick"], move |wp, s| {
+                        set_lines(wp, from, WHICH[k], LineStyle::from_index(s), false);
+                        wp.after_edit();
+                        None
+                    }) as Box<dyn Screen>)
+                }).prefix("Lines: "));
+            }
+            Input::Char('4') | Input::Char('h') | Input::Char('H') => {
+                let cur = cur_opt(wp).header_rows;
+                return Outcome::Push(Prompt::new("Number of header rows:", &cur.to_string(), |wp, s| {
+                    let n: u16 = s?.trim().parse().ok()?;
+                    let rows = TableEdit::with_table(wp, |_, t, _, _| t.rows.len())?;
+                    change_opt(wp, |o| o.header_rows = n.min(rows as u16));
+                    wp.after_edit();
+                    None
+                }));
+            }
+            Input::Char('6') | Input::Char('o') | Input::Char('O') => return Outcome::Push(table_options()),
             Input::Char('5') | Input::Char('m') | Input::Char('M') => return Outcome::Push(crate::math::table_math_menu()),
             Input::Char(_) => {}
             _ => {}
@@ -906,7 +1281,19 @@ impl Screen for TableEdit {
         if rows >= 3 {
             g.fill_row(rows - 2, 0, g.cols, ' ', st);
             g.fill_row(rows - 1, 0, g.cols, ' ', st);
-            g.text(0, rows - 2, "Ctrl-Arrows Column Widths; Ins Insert; Del Delete; Move Copy;", st);
+            // (on a screen where the menu covers the status line, the
+            // cell is shown at the end of the line above the menu)
+            if self.block.is_some() {
+                // the cells from where Block started to the cursor are
+                // what Lines and Join work on
+                let c = g.text(0, rows - 2, "Block on", wp.theme.bold);
+                g.text(c, rows - 2, "; move to the last cell, then 3 Lines or 7 Join", st);
+            } else {
+                g.text(0, rows - 2, "Ctrl-Arrows Column Widths; Ins Insert; Del Delete; Alt-F4 Block;", st);
+            }
+            if status_row + 2 >= rows {
+                g.text(g.cols.saturating_sub(addr.len() + 1), rows - 2, &addr, st);
+            }
             let c = g.text_mn(0, rows - 1, "1 ~Size; 2 ~Format; 3 ~Lines; 4 ~Header; 5 ~Math; 6 ~Options; 7 ~Join; 8 S~plit: ", st, wp.theme.bold);
             g.text(c, rows - 1, "0", st);
         }
@@ -1123,5 +1510,589 @@ mod tests {
         assert!(codes(&wp).contains("[Cell][Join:1x2]a1[HRt]a2[Cell]b1"), "{}", codes(&wp));
         let lay = &wp.ed_ref().layout;
         assert!(!lay.tables[0].rule_h(0, 0) && lay.tables[0].rule_h(0, 1));
+    }
+
+    // ---- Table Edit: 3 Lines, 4 Header, 6 Options ----
+
+    use crate::layout::MonoMetrics;
+    use LineStyle::{Dashed, Dotted, ExtraThick, Thick};
+
+    /// Table Edit with the cursor in cell (r, c) of a 3×3 table.
+    fn edit33(r: usize, c: usize) -> Wp {
+        let mut wp = table33();
+        go(&mut wp, r, c);
+        f(&mut wp, Func::ColumnsTable);
+        wp
+    }
+
+    fn go(wp: &mut Wp, r: usize, c: usize) {
+        let e = wp.ed();
+        let t = table_at(&e.doc.els, e.cursor).unwrap();
+        goto_cell(e, &t, r, c);
+    }
+
+    fn geom(wp: &Wp) -> &crate::layout::TableGeom {
+        &wp.ed_ref().layout.tables[0]
+    }
+
+    /// The lines of the whole table as text: per row its vertical lines,
+    /// then per border its horizontal ones (first letters; `-` = none).
+    fn lines(wp: &Wp) -> String {
+        let g = geom(wp);
+        let ch = |s: LineStyle| ['-', 'S', 'D', 'a', 'o', 'T', 'E'][s as usize];
+        let v: Vec<String> = (0..3).map(|r| (0..4).map(|k| ch(g.style_v(r, k))).collect()).collect();
+        let h: Vec<String> = (0..4).map(|b| (0..3).map(|c| ch(g.line_above(b, c))).collect()).collect();
+        format!("{} / {}", v.join(" "), h.join(" "))
+    }
+
+    const PLAIN: &str = "DSSD DSSD DSSD / DDD SSS SSS DDD";
+
+    #[test]
+    fn lines_of_a_single_cell() {
+        // every choice on B2: (keys, the table's lines, the code it leaves)
+        let cases = [
+            ("313", "DSSD DDSD DSSD / DDD SSS SSS DDD", "[Cell][Cell Lines:Left Double]b2"),
+            ("324", "DSSD DSaD DSSD / DDD SSS SSS DDD", "[Cell][Cell Lines:Left Dashed]c2"),
+            ("331", "DSSD DSSD DSSD / DDD S-S SSS DDD", "[Cell][Cell Lines:Top None]b2"),
+            ("346", "DSSD DSSD DSSD / DDD SSS STS DDD", "[Cell][Cell Lines:Top Thick]b3"),
+            ("367", "DSSD DEED DSSD / DDD SES SES DDD", "[Cell][Cell Lines:Left Extra Thick;Top Extra Thick]b2[Cell][Cell Lines:Left Extra Thick]c2"),
+            ("375", "DSSD DooD DSSD / DDD SoS SoS DDD", "[Cell][Cell Lines:Left Dotted;Top Dotted]b2"),
+            // (a single cell has no lines inside)
+            ("353", PLAIN, "[Cell]b2[Cell]c2"),
+        ];
+        for (k, want, code) in cases {
+            let mut wp = edit33(1, 1);
+            let before = codes(&wp);
+            keys(&mut wp, k);
+            assert_eq!(lines(&wp), want, "{k}");
+            assert!(codes(&wp).contains(code), "{k}: {}", codes(&wp));
+            // still in Table Edit, in the same cell; one undo step
+            let t = table_at(&wp.ed_ref().doc.els, wp.ed_ref().cursor).unwrap();
+            assert_eq!(t.locate(wp.ed_ref().cursor), Some((1, 1)), "{k}");
+            if codes(&wp) != before {
+                wp.ed().undo();
+            }
+            assert_eq!(codes(&wp), before, "{k}");
+        }
+        // letters work as well: Lines, Bottom, Double
+        let mut wp = edit33(1, 1);
+        keys(&mut wp, "lbd");
+        assert_eq!(lines(&wp), "DSSD DSSD DSSD / DDD SSS SDS DDD");
+        // the edges of the table: Right and Bottom of the last cell are
+        // its own; None there removes the frame
+        let mut wp = edit33(2, 2);
+        keys(&mut wp, "321");
+        keys(&mut wp, "341");
+        assert_eq!(lines(&wp), "DSSD DSSD DSS- / DDD SSS SSS DD-");
+        assert!(codes(&wp).contains("[Cell][Cell Lines:Right None;Bottom None]c3"), "{}", codes(&wp));
+        // the default again: nothing is left behind
+        keys(&mut wp, "323");
+        keys(&mut wp, "343");
+        assert_eq!(lines(&wp), PLAIN);
+        assert!(!codes(&wp).contains("[Cell Lines"), "{}", codes(&wp));
+    }
+
+    #[test]
+    fn a_line_set_last_counts() {
+        // B2's left line from B2, then the same line as A2's right line
+        let mut wp = edit33(1, 1);
+        keys(&mut wp, "313");
+        go(&mut wp, 1, 0);
+        keys(&mut wp, "326");
+        assert_eq!(lines(&wp), "DSSD DTSD DSSD / DDD SSS SSS DDD");
+        assert_eq!(codes(&wp).matches("[Cell Lines").count(), 1, "{}", codes(&wp));
+        // from a file both sides may be set: the left side of the cell on
+        // the right counts, and the top of the cell below
+        let mut wp = table33();
+        let t = table_at(&wp.ed_ref().doc.els, wp.ed_ref().cursor).unwrap();
+        let (a2, b2, b1) = (t.rows[1][0], t.rows[1][1], t.rows[0][1]);
+        let e = wp.ed();
+        e.doc.els.insert(b2 + 1, El::Code(Code::CellFmt(CellFmt { lines: [Some(Dotted), None, Some(Dashed), None], shade: false })));
+        e.doc.els.insert(a2 + 1, El::Code(Code::CellFmt(CellFmt { lines: [None, Some(Thick), None, None], shade: false })));
+        e.doc.els.insert(b1 + 1, El::Code(Code::CellFmt(CellFmt { lines: [None, None, None, Some(ExtraThick)], shade: false })));
+        e.relayout();
+        assert_eq!(lines(&wp), "DSSD DoSD DSSD / DDD SaS SSS DDD");
+    }
+
+    #[test]
+    fn lines_of_a_block() {
+        // Block A1..B2, then: (keys, the table's lines)
+        let cases = [
+            ("316", "TSSD TSSD DSSD / DDD SSS SSS DDD"),
+            ("326", "DSTD DSTD DSSD / DDD SSS SSS DDD"),
+            ("331", "DSSD DSSD DSSD / --D SSS SSS DDD"),
+            ("344", "DSSD DSSD DSSD / DDD SSS aaS DDD"),
+            ("351", "D-SD D-SD DSSD / DDD --S SSS DDD"),
+            ("366", "TSTD TSTD DSSD / TTD SSS TTS DDD"),
+            ("373", "DDDD DDDD DSSD / DDD DDS DDS DDD"),
+        ];
+        for (k, want) in cases {
+            let mut wp = edit33(0, 0);
+            let before = codes(&wp);
+            f(&mut wp, Func::Block);
+            f(&mut wp, Func::Right);
+            f(&mut wp, Func::Down);
+            keys(&mut wp, k);
+            assert_eq!(lines(&wp), want, "{k}");
+            // Block is off again, and it was one undo step
+            assert!(wp.ed_ref().block_anchor.is_none());
+            wp.ed().undo();
+            assert_eq!(codes(&wp), before, "{k}");
+        }
+        // a joined cell is one cell: no lines inside it, its outside set
+        let mut wp = edit33(0, 0);
+        f(&mut wp, Func::Block);
+        f(&mut wp, Func::Right);
+        keys(&mut wp, "7y");
+        keys(&mut wp, "376");
+        assert_eq!(lines(&wp), "T-TD DSSD DSSD / TTD TTS SSS DDD");
+        assert!(codes(&wp).contains("[Cell][Join:2x1][Cell Lines:Left Thick;Top Thick]a1"), "{}", codes(&wp));
+    }
+
+    #[test]
+    fn shading() {
+        let mut wp = edit33(1, 1);
+        let before = codes(&wp);
+        keys(&mut wp, "381");
+        assert!(codes(&wp).contains("[Cell][Cell Lines:Shade On]b2"), "{}", codes(&wp));
+        assert!(geom(&wp).shaded(1, 1) && !geom(&wp).shaded(1, 0) && !geom(&wp).shaded(0, 1));
+        // … in print: one gray area, 10 % of black, between the cell's lines
+        let e = wp.ed_ref();
+        let pages = crate::page::build_pages(&e.doc, &e.layout, &MonoMetrics);
+        let fills: Vec<_> = pages[0].images.iter().filter(|p| p.img.is_none()).collect();
+        assert_eq!(fills.len(), 1);
+        assert_eq!(fills[0].color >> 24, 25);
+        let x = &e.layout.tables[0].x;
+        assert_eq!((fills[0].dst.0, fills[0].dst.2), (x[1], x[2] - x[1]));
+        // … on the edit screen: another background
+        let mut g = Grid::new(80, 25, wp.theme.normal);
+        wp.draw(&mut g);
+        let row = (0..25).find(|&r| (0..80).any(|c| g.get(c, r).unwrap().ch == 'b') && (0..80).any(|c| g.get(c, r).unwrap().ch == '2')).unwrap();
+        let col = (0..80).find(|&c| g.get(c, row).unwrap().ch == 'b').unwrap();
+        assert_ne!(g.get(col, row).unwrap().bg, wp.theme.normal.bg);
+        assert_eq!(g.get(col - 3, row).unwrap().bg, wp.theme.normal.bg);
+        // Off: the code goes; one undo step each
+        keys(&mut wp, "382");
+        assert_eq!(codes(&wp), before);
+        wp.ed().undo();
+        assert!(codes(&wp).contains("Shade On"));
+        wp.ed().undo();
+        assert_eq!(codes(&wp), before);
+        // a block; shading stays beside lines
+        f(&mut wp, Func::Block);
+        f(&mut wp, Func::Up);
+        f(&mut wp, Func::Left);
+        keys(&mut wp, "38o");
+        assert_eq!(codes(&wp).matches("[Cell Lines:Shade On]").count(), 4, "{}", codes(&wp));
+        keys(&mut wp, "316");
+        assert!(codes(&wp).contains("[Cell][Cell Lines:Left Thick;Shade On]a1"), "{}", codes(&wp));
+        go(&mut wp, 0, 0);
+        keys(&mut wp, "38f");
+        assert!(codes(&wp).contains("[Cell][Cell Lines:Left Thick]a1"), "{}", codes(&wp));
+    }
+
+    #[test]
+    fn line_characters_on_the_edit_screen() {
+        let mut wp = edit33(0, 0);
+        f(&mut wp, Func::Block);
+        f(&mut wp, Func::Right);
+        f(&mut wp, Func::Down);
+        keys(&mut wp, "366"); // Outside, Thick
+        go(&mut wp, 2, 2);
+        keys(&mut wp, "374"); // All, Dashed
+        f(&mut wp, Func::Block);
+        let mut g = Grid::new(80, 25, wp.theme.normal);
+        wp.draw(&mut g);
+        let text: Vec<String> = (0..25).map(|r| (0..80).map(|c| g.get(c, r).unwrap().ch).collect::<String>().trim().to_string()).collect();
+        let row = |k: usize| text.iter().filter(|l| l.starts_with(['┌', '┃', '├', '╟', '║', '╚', '╔'])).nth(k).cloned().unwrap_or_default();
+        assert!(row(0).starts_with("┌━━") && row(0).ends_with("═╗"), "{text:#?}");
+        assert!(row(1).starts_with("┃a1") && row(1).contains("│b1") && row(1).contains("┃c1") && row(1).ends_with('║'), "{text:#?}");
+        assert!(row(2).starts_with("├──") && row(2).ends_with("─╢"), "{text:#?}");
+        assert!(row(4).contains("━┼╌╌") , "{text:#?}");
+        assert!(row(5).starts_with("║a3") && row(5).contains("╎c3") && row(5).ends_with('╎'), "{text:#?}");
+        assert!(row(6).starts_with("╚═") && row(6).contains("╧╌╌"), "{text:#?}");
+        // the footer says that Block is on, and which cell the cursor is in
+        assert!(text[23].starts_with("Block on") && text[23].ends_with("Cell C3"), "{}", text[23]);
+        assert!(text[24].starts_with("1 Size; 2 Format; 3 Lines; 4 Header; 5 Math; 6 Options; 7 Join; 8 Split:"), "{}", text[24]);
+    }
+
+    #[test]
+    fn lines_in_print() {
+        let rules = |k: &str| {
+            let mut wp = edit33(1, 1);
+            keys(&mut wp, k);
+            let e = wp.ed_ref();
+            let x = e.layout.tables[0].x.clone();
+            let pages = crate::page::build_pages(&e.doc, &e.layout, &MonoMetrics);
+            // what lies on B2's left line, beside its text
+            let y = e.layout.lines[e.layout.line_of(e.cursor)].y + 100;
+            let on: Vec<_> = pages[0].rules.iter().filter(|r| r.0 > x[1] - 60 && r.0 + r.2 < x[1] + 60 && r.1 <= y && r.1 + r.3 > y).cloned().collect();
+            let all: Vec<_> = pages[0].rules.iter().filter(|r| r.0 > x[1] - 60 && r.0 + r.2 < x[1] + 60).cloned().collect();
+            (on, all.len())
+        };
+        let (single, n_single) = rules("");
+        assert_eq!(single.iter().map(|r| r.2).collect::<Vec<_>>(), vec![6]);
+        assert_eq!(n_single, 3);
+        assert!(rules("311").0.is_empty() && rules("311").1 == 2);
+        // double: two thin rules side by side
+        let (double, _) = rules("313");
+        assert_eq!(double.len(), 2);
+        assert!(double.iter().all(|r| r.2 == 6) && (double[0].0 - double[1].0).abs() == 12);
+        // dashed and dotted: pieces
+        assert!(rules("314").1 >= 4 && rules("315").1 > rules("314").1);
+        assert_eq!(rules("316").0.iter().map(|r| r.2).collect::<Vec<_>>(), vec![30]);
+        assert_eq!(rules("317").0.iter().map(|r| r.2).collect::<Vec<_>>(), vec![54]);
+    }
+
+    /// A table of two columns and `rows` one-line rows, "Head" in A1, the
+    /// cursor in A1.
+    fn long_table(rows: usize) -> Wp {
+        let mut wp = Wp::new(80, 25);
+        f(&mut wp, Func::ColumnsTable);
+        keys(&mut wp, "212");
+        f(&mut wp, Func::Enter);
+        keys(&mut wp, &rows.to_string());
+        f(&mut wp, Func::Enter);
+        f(&mut wp, Func::Exit);
+        keys(&mut wp, "Head");
+        wp
+    }
+
+    #[test]
+    fn header_rows() {
+        let mut wp = edit33(1, 1);
+        let before = codes(&wp);
+        keys(&mut wp, "42");
+        f(&mut wp, Func::Enter);
+        assert!(codes(&wp).contains("\"][Tbl Opt:Hdr 2][Row][Cell]a1"), "{}", codes(&wp));
+        assert_eq!(geom(&wp).header_rows, 2);
+        let t = table_at(&wp.ed_ref().doc.els, wp.ed_ref().cursor).unwrap();
+        assert_eq!(t.locate(wp.ed_ref().cursor), Some((1, 1)));
+        // the prompt shows the number; 0 takes the code away; undo
+        keys(&mut wp, "4");
+        let mut g = Grid::new(80, 25, wp.theme.normal);
+        wp.draw(&mut g);
+        let last: String = (0..80).map(|c| g.get(c, 24).unwrap().ch).collect();
+        assert!(last.starts_with("Number of header rows: 2"), "{last}");
+        keys(&mut wp, "0");
+        f(&mut wp, Func::Enter);
+        assert_eq!(codes(&wp), before);
+        wp.ed().undo();
+        assert!(codes(&wp).contains("[Tbl Opt:Hdr 2]"));
+        wp.ed().undo();
+        assert_eq!(codes(&wp), before);
+        // not more than there are rows
+        keys(&mut wp, "h9");
+        f(&mut wp, Func::Enter);
+        assert!(codes(&wp).contains("[Tbl Opt:Hdr 3]"), "{}", codes(&wp));
+    }
+
+    #[test]
+    fn header_rows_take_room_on_the_following_pages() {
+        let mut wp = long_table(120);
+        let plain = wp.ed_ref().layout.clone();
+        assert_eq!(plain.pages, 3);
+        assert!(plain.tbl_repeats.is_empty());
+        f(&mut wp, Func::ColumnsTable);
+        keys(&mut wp, "41");
+        f(&mut wp, Func::Enter);
+        f(&mut wp, Func::Exit);
+        let e = wp.ed_ref();
+        let lay = &e.layout;
+        // one header row: top line, text, the line below it
+        let h = 60 + plain.lines[0].height + 60;
+        let reps: Vec<_> = lay.tbl_repeats.iter().map(|r| (r.table, r.page, r.y)).collect();
+        assert_eq!(reps, vec![(0, 2, e.doc.init.top), (0, 3, e.doc.init.top)]);
+        // the first line of page 2 stands lower by that; the edit screen
+        // has the same rows as before
+        let first2 = |l: &crate::layout::Layout| l.lines.iter().find(|x| x.page == 2).map(|x| x.y).unwrap();
+        assert_eq!(first2(lay), first2(&plain) + h);
+        assert_eq!(lay.drows.len(), plain.drows.len());
+        // fewer rows fit on page 2: the last row stands lower on page 3
+        let (a, b) = (plain.lines.last().unwrap(), lay.lines.last().unwrap());
+        assert!(b.page == 3 && a.page == 3 && b.y > a.y + h, "{} {}", a.y, b.y);
+        // printed: the header text on every page, with its lines
+        let pages = crate::page::build_pages(&e.doc, lay, &MonoMetrics);
+        assert_eq!(pages.len(), 3);
+        let head = |p: &crate::page::Page| p.runs.iter().filter(|r| r.text.iter().collect::<String>() == "Head").map(|r| r.y).collect::<Vec<_>>();
+        let y1 = head(&pages[0]);
+        assert_eq!(y1.len(), 1);
+        assert_eq!(head(&pages[1]), y1);
+        assert_eq!(head(&pages[2]), y1);
+        // (the table's double top line at the same place on each page)
+        let top = |p: &crate::page::Page| p.rules.iter().filter(|r| r.2 > 1000).map(|r| r.1).min().unwrap();
+        assert_eq!(top(&pages[1]), top(&pages[0]));
+        let plain_pages = crate::page::build_pages(&e.doc, &plain, &MonoMetrics);
+        assert!(pages[1].rules.len() > plain_pages[1].rules.len());
+        // without header rows page 2 has no "Head"
+        assert!(head(&plain_pages[1]).is_empty());
+    }
+
+    /// Keys; a line feed is Enter.
+    fn typed(wp: &mut Wp, s: &str) {
+        for c in s.chars() {
+            match c {
+                '\n' => f(wp, Func::Enter),
+                c => wp.input(Input::Char(c)),
+            }
+        }
+    }
+
+    #[test]
+    fn options_spacing() {
+        let mut wp = edit33(1, 1);
+        let before = codes(&wp);
+        let plain = wp.ed_ref().layout.clone();
+        // the screen
+        keys(&mut wp, "6");
+        let mut g = Grid::new(80, 25, wp.theme.normal);
+        wp.draw(&mut g);
+        let text: Vec<String> = (0..25).map(|r| (0..80).map(|c| g.get(c, r).unwrap().ch).collect::<String>().trim_end().to_string()).collect();
+        assert_eq!(text[0], "Table Options");
+        assert!(text[2].contains("1 - Spacing Between Text and Lines"), "{text:#?}");
+        assert!(text[3].contains("Left") && text[3].ends_with("0.1\""), "{text:#?}");
+        assert!(text[6].contains("Bottom") && text[6].ends_with("0\""), "{text:#?}");
+        assert!(text[8].contains("2 - Display Negative Results") && text[8].ends_with('1'), "{text:#?}");
+        assert!(text[12].contains("3 - Position of Table") && text[12].ends_with("Left"), "{text:#?}");
+        assert!(text[14].contains("4 - Gray Shading (% of black)") && text[14].ends_with("10%"), "{text:#?}");
+        // left 0.3", right 0", top 0.1", bottom 0.2"
+        keys(&mut wp, "1.3");
+        f(&mut wp, Func::Enter);
+        keys(&mut wp, "0");
+        f(&mut wp, Func::Enter);
+        keys(&mut wp, ".1");
+        f(&mut wp, Func::Enter);
+        keys(&mut wp, ".2");
+        f(&mut wp, Func::Enter);
+        // Exit leaves the screen for Table Edit, not for the document
+        f(&mut wp, Func::Exit);
+        assert_eq!(wp.screens.len(), 1);
+        assert!(codes(&wp).contains("[Tbl Opt:Spacing 0.3\",0\",0.1\",0.2\"][Row]"), "{}", codes(&wp));
+        let lay = &wp.ed_ref().layout;
+        let x = lay.tables[0].x.clone();
+        assert_eq!(x, plain.tables[0].x);
+        // text starts 0.3" right of the line, and may reach the line on the right
+        let li = lay.line_of(wp.ed_ref().cursor);
+        assert_eq!(lay.lines[li].caret[0].1, x[1] + 360);
+        assert_eq!(lay.lines[li].right, x[2]);
+        assert_eq!(plain.lines[li].caret[0].1, x[1] + 120);
+        assert_eq!(plain.lines[li].right, x[2] - 120);
+        // rows stand 0.1" + 0.2" further apart; the first one 0.1" lower
+        assert_eq!(lay.lines[0].y, plain.lines[0].y + 120);
+        assert_eq!(lay.lines[li].y, plain.lines[li].y + 120 + 360);
+        // the defaults again: no code; undo
+        typed(&mut wp, "61.1\n.1\n0\n0\n");
+        f(&mut wp, Func::Exit);
+        assert_eq!(codes(&wp), before);
+        wp.ed().undo();
+        assert!(codes(&wp).contains("[Tbl Opt:Spacing"));
+        wp.ed().undo();
+        assert_eq!(codes(&wp), before);
+    }
+
+    #[test]
+    fn options_position() {
+        let mut wp = edit33(1, 1);
+        // a table of 3 × 1"
+        wp.ed().cursor = 0;
+        wp.ed().doc.els[0] = El::Code(Code::TblDef { cols: vec![1200; 3] });
+        wp.ed().relayout();
+        go_from_start(&mut wp);
+        let before = codes(&wp);
+        let init = wp.ed_ref().doc.init.clone();
+        let (l, r) = (init.left, init.page_width - init.right);
+        assert_eq!(geom(&wp).x, vec![l, l + 1200, l + 2400, l + 3600]);
+        keys(&mut wp, "632");
+        assert!(codes(&wp).contains("[Tbl Opt:Pos Right][Row]"), "{}", codes(&wp));
+        assert_eq!(geom(&wp).x, vec![r - 3600, r - 2400, r - 1200, r]);
+        keys(&mut wp, "3c");
+        let c = l + (r - l - 3600) / 2;
+        assert_eq!(geom(&wp).x, vec![c, c + 1200, c + 2400, c + 3600]);
+        // the text moves with its cell
+        let lay = &wp.ed_ref().layout;
+        assert_eq!(lay.lines[lay.line_of(wp.ed_ref().cursor)].caret[0].1, c + 1200 + 120);
+        // Full: the columns share the room between the margins
+        keys(&mut wp, "34");
+        let w = (r - l) / 3;
+        assert_eq!(geom(&wp).x, vec![l, l + w, l + 2 * w, r]);
+        assert!(codes(&wp).contains("[Tbl Def:I;3,1\",1\",1\"][Tbl Opt:Pos Full]"), "{}", codes(&wp));
+        // Set Position: from the left edge of the paper
+        keys(&mut wp, "35");
+        keys(&mut wp, "2.5");
+        f(&mut wp, Func::Enter);
+        assert_eq!(geom(&wp).x[0], 3000);
+        assert!(codes(&wp).contains("[Tbl Opt:Pos 2.5\"]"), "{}", codes(&wp));
+        // Left: the default, no code; every change was one undo step
+        keys(&mut wp, "31");
+        assert_eq!(codes(&wp), before);
+        for want in ["Pos 2.5\"", "Pos Full", "Pos Center", "Pos Right"] {
+            wp.ed().undo();
+            assert!(codes(&wp).contains(want), "{want}: {}", codes(&wp));
+        }
+        wp.ed().undo();
+        assert_eq!(codes(&wp), before);
+    }
+
+    fn go_from_start(wp: &mut Wp) {
+        let e = wp.ed();
+        let t = parse(&e.doc.els, 0).unwrap();
+        goto_cell(e, &t, 1, 1);
+    }
+
+    #[test]
+    fn options_negative_results_and_gray() {
+        // A1 = 2, B1 = 5, C1 = A1-B1
+        let mut wp = Wp::new(80, 25);
+        f(&mut wp, Func::ColumnsTable);
+        keys(&mut wp, "213");
+        f(&mut wp, Func::Enter);
+        keys(&mut wp, "1");
+        f(&mut wp, Func::Enter);
+        f(&mut wp, Func::Exit);
+        keys(&mut wp, "2");
+        f(&mut wp, Func::Tab);
+        keys(&mut wp, "5");
+        f(&mut wp, Func::Tab);
+        f(&mut wp, Func::ColumnsTable);
+        keys(&mut wp, "52A1-B1");
+        f(&mut wp, Func::Enter);
+        assert!(codes(&wp).ends_with("-3.00[Tbl Off]"), "{}", codes(&wp));
+        let before = codes(&wp);
+        keys(&mut wp, "622");
+        assert!(codes(&wp).contains("[Tbl Opt:Neg ()]") && codes(&wp).ends_with("(3.00)[Tbl Off]"), "{}", codes(&wp));
+        // … and a result in parentheses still counts as negative
+        keys(&mut wp, "0");
+        keys(&mut wp, "51");
+        assert!(codes(&wp).ends_with("(3.00)[Tbl Off]"), "{}", codes(&wp));
+        keys(&mut wp, "621");
+        assert_eq!(codes(&wp), before);
+        wp.ed().undo();
+        assert!(codes(&wp).ends_with("(3.00)[Tbl Off]"), "{}", codes(&wp));
+        // gray shading: the darkness of shaded cells
+        typed(&mut wp, "440\n");
+        f(&mut wp, Func::Exit);
+        assert!(codes(&wp).contains("[Tbl Opt:Neg ();Gray 40%]"), "{}", codes(&wp));
+        keys(&mut wp, "381");
+        let e = wp.ed_ref();
+        assert_eq!(e.layout.tables[0].gray, 40);
+        let pages = crate::page::build_pages(&e.doc, &e.layout, &MonoMetrics);
+        assert_eq!(pages[0].images.iter().map(|p| p.color >> 24).collect::<Vec<_>>(), vec![102]);
+        wp.ed().undo();
+        wp.ed().undo();
+        assert!(codes(&wp).contains("[Tbl Opt:Neg ()][Row]"), "{}", codes(&wp));
+    }
+
+    #[test]
+    fn table_codes_stay_in_place() {
+        // header rows, B2 with lines and shading
+        let setup = || {
+            let mut wp = edit33(1, 1);
+            keys(&mut wp, "41");
+            f(&mut wp, Func::Enter);
+            keys(&mut wp, "375");
+            keys(&mut wp, "381");
+            wp
+        };
+        let b2 = "[Cell][Cell Lines:Left Dotted;Top Dotted;Shade On]b2[Cell][Cell Lines:Left Dotted]c2";
+        let wp = setup();
+        assert!(codes(&wp).contains(b2) && codes(&wp).contains("[Tbl Opt:Hdr 1][Row][Cell]a1"), "{}", codes(&wp));
+        // insert a row and a column in front: the codes move with their cells
+        let mut wp = setup();
+        f(&mut wp, Func::Typeover);
+        keys(&mut wp, "r1");
+        f(&mut wp, Func::Enter);
+        go(&mut wp, 2, 1);
+        f(&mut wp, Func::Typeover);
+        keys(&mut wp, "c1");
+        f(&mut wp, Func::Enter);
+        let c = codes(&wp);
+        assert!(c.contains("[Tbl Opt:Hdr 1][Row][Cell]a1[Cell][Cell]b1"), "{c}");
+        assert!(c.contains("[Row][Cell]a2[Cell]") && c.contains(b2), "{c}");
+        assert!(geom(&wp).shaded(2, 2) && !geom(&wp).shaded(1, 1));
+        // delete the column and the row of B2: its codes go with it
+        let mut wp = setup();
+        f(&mut wp, Func::Del);
+        keys(&mut wp, "c1");
+        f(&mut wp, Func::Enter);
+        let c = codes(&wp);
+        assert!(c.contains("[Tbl Opt:Hdr 1][Row]") && c.contains("[Cell]a2[Cell][Cell Lines:Left Dotted]c2") && !c.contains("Shade"), "{c}");
+        let mut wp = setup();
+        f(&mut wp, Func::Del);
+        keys(&mut wp, "r1");
+        f(&mut wp, Func::Enter);
+        let c = codes(&wp);
+        assert!(c.contains("[Tbl Opt:Hdr 1][Row]") && c.contains("[Cell Lines:Top Dotted]b3") && !c.contains("Shade"), "{c}");
+        // Join keeps the settings of the table and of the first cell
+        let mut wp = setup();
+        f(&mut wp, Func::Block);
+        f(&mut wp, Func::Right);
+        keys(&mut wp, "7y");
+        let c = codes(&wp);
+        assert!(c.contains("[Tbl Opt:Hdr 1][Row]"), "{c}");
+        assert!(c.contains("[Cell][Join:2x1][Cell Lines:Left Dotted;Top Dotted;Shade On]b2[HRt]c2[Cell][Row]"), "{c}");
+        assert!(geom(&wp).shaded(1, 1) && geom(&wp).shaded(1, 2));
+        // … lines of the joined cell go behind [Join], and Split keeps them
+        keys(&mut wp, "313");
+        keys(&mut wp, "8");
+        assert!(codes(&wp).contains("[Cell][Cell Lines:Left Double;Top Dotted;Shade On]b2"), "{}", codes(&wp));
+        // deleting a part of the table leaves them, a copy doesn't take them
+        let mut wp = setup();
+        f(&mut wp, Func::Exit);
+        let t = table_at(&wp.ed_ref().doc.els, wp.ed_ref().cursor).unwrap();
+        let (from, to) = (t.rows[0][2] + 1, t.rows[2][0] + 2);
+        let got: String = copy_range(&wp.ed_ref().doc.els, from, to).iter().map(|e| match e {
+            El::Ch(c) => c.to_string(),
+            El::Code(c) => crate::reveal::code_text(c),
+        }).collect();
+        assert_eq!(got, "c1[HRt]a2[Tab]b2[Tab]c2[HRt]a");
+        wp.ed().delete_range(from, to, true);
+        let c = codes(&wp);
+        assert!(c.contains("[Cell][Cell Lines:Left Dotted;Top Dotted;Shade On][Cell][Cell Lines:Left Dotted][Row][Cell]3"), "{c}");
+        // (from before the table into it: its settings stay, too)
+        let mut wp = setup();
+        f(&mut wp, Func::Exit);
+        wp.ed().delete_range(0, 5, true);
+        assert!(codes(&wp).contains("\"][Tbl Opt:Hdr 1][Row][Cell]1[Cell]b1"), "{}", codes(&wp));
+        // plain text and the cursor don't notice the codes
+        let wp = setup();
+        let d = &wp.ed_ref().doc;
+        assert_eq!(d.plain_text(0, d.len()), "a1\tb1\tc1\na2\tb2\tc2\na3\tb3\tc3\n");
+        let mut wp = setup();
+        f(&mut wp, Func::Exit);
+        wp.ed().cursor = 0;
+        f(&mut wp, Func::Right);
+        keys(&mut wp, "X");
+        assert!(codes(&wp).contains("[Tbl Opt:Hdr 1][Row][Cell]Xa1"), "{}", codes(&wp));
+        // without its [Tbl Def] the table is text; what belongs to a table goes
+        let mut wp = setup();
+        f(&mut wp, Func::Exit);
+        remove_structure(wp.ed(), 0);
+        assert_eq!(codes(&wp), "a1[Tab]b1[Tab]c1[HRt]a2[Tab]b2[Tab]c2[HRt]a3[Tab]b3[Tab]c3[HRt]");
+    }
+
+    #[test]
+    fn stream_round_trip() {
+        let mut wp = edit33(1, 1);
+        keys(&mut wp, "42");
+        f(&mut wp, Func::Enter);
+        typed(&mut wp, "61.2\n.05\n.1\n0\n223c435\n");
+        f(&mut wp, Func::Exit);
+        keys(&mut wp, "374");
+        keys(&mut wp, "381");
+        go(&mut wp, 2, 2);
+        keys(&mut wp, "361");
+        f(&mut wp, Func::Exit);
+        let doc = &wp.ed_ref().doc;
+        let c = codes(&wp);
+        assert!(c.contains("[Tbl Opt:Hdr 2;Spacing 0.2\",0.05\",0.1\",0\";Neg ();Pos Center;Gray 35%]"), "{c}");
+        assert!(c.contains("[Cell][Cell Lines:Left None;Right None;Top None;Bottom None]c3"), "{c}");
+        let back = crate::stream::read(&crate::stream::write(doc)).unwrap();
+        assert_eq!(back.els, doc.els);
+        // Set Position, too
+        let mut d = Document::new();
+        d.els = new_table(2, 1, 4800);
+        d.els.insert(1, El::Code(Code::TblOpt(TblOpt { pos: TblPos::Set(2040), ..Default::default() })));
+        let back = crate::stream::read(&crate::stream::write(&d)).unwrap();
+        assert_eq!(back.els, d.els);
     }
 }

@@ -600,35 +600,60 @@ impl<'a> W<'a> {
         x
     }
 
+    /// A table.  A table without `[Tbl Opt]` / `[Cell Lines]` codes is
+    /// written with one cell style (a thin line around every cell).
+    /// Otherwise every cell gets the lines it shows (`fo:border-*`), a
+    /// gray `fo:background-color` when shaded and the cell spacing
+    /// (`fo:padding-*`).  Header rows stand in `table:table-header-rows`.
+    /// Position: `table:align` (Full = "margins"), Set = a left margin.
     fn table(&mut self, els: &[El], t: &crate::tables::Table, hdr: bool, brk: bool, pf: &mut ParaFmt) -> String {
         self.ntable += 1;
         let ncols = t.rows.iter().map(|r| r.len()).max().unwrap_or(0).max(t.cols.len()).max(1);
         let widths: Vec<i32> = (0..ncols).map(|c| t.cols.get(c).copied().unwrap_or(1200).max(60)).collect();
         let total: i32 = widths.iter().sum();
         let brk = if brk { " fo:break-before=\"page\"" } else { "" };
-        let ts = self.reg(hdr).get("table", "Tbl", &format!("><style:table-properties style:width=\"{}\" table:align=\"left\"{brk}/>", inch(total)));
+        let opt = crate::tables::opt_at(els, t.def);
+        let align = match opt.pos {
+            TblPos::Left => "left".to_string(),
+            TblPos::Right => "right".to_string(),
+            TblPos::Center => "center".to_string(),
+            TblPos::Full => "margins".to_string(),
+            TblPos::Set(x) => format!("left\" fo:margin-left=\"{}", inch(x - self.doc.init.left)),
+        };
+        let ts = self.reg(hdr).get("table", "Tbl", &format!("><style:table-properties style:width=\"{}\" table:align=\"{align}\"{brk}/>", inch(total)));
         let mut x = format!("<table:table table:name=\"Table{}\" table:style-name=\"{ts}\">", self.ntable);
         for w in &widths {
             let cs = self.reg(hdr).get("table-column", "Col", &format!("><style:table-column-properties style:column-width=\"{}\"/>", inch(*w)));
             x.push_str(&format!("<table:table-column table:style-name=\"{cs}\"/>"));
         }
-        let cell = self.reg(hdr).get("table-cell", "Cell", "><style:table-cell-properties fo:padding=\"0.04in\" fo:border=\"0.5pt solid #000000\"/>");
+        let look = crate::fmt_build::table_look(els, t);
+        let plain = look.is_plain() && opt.pad == TblOpt::default().pad;
+        let padding = if opt.pad == TblOpt::default().pad {
+            String::from("fo:padding=\"0.04in\"")
+        } else {
+            format!("fo:padding-left=\"{}\" fo:padding-right=\"{}\" fo:padding-top=\"{}\" fo:padding-bottom=\"{}\"", inch(opt.pad[0]), inch(opt.pad[1]), inch(opt.pad[2]), inch(opt.pad[3]))
+        };
+        let fill = crate::fmt_build::gray_hex(opt.gray);
         let empty_row = vec![];
         let rows: Vec<&Vec<usize>> = if t.rows.is_empty() { vec![&empty_row] } else { t.rows.iter().collect() };
+        let header = (opt.header_rows as usize).min(rows.len());
         // joined cells: spans on the first cell, the cells it covers as
         // <table:covered-table-cell/>
         use crate::tables::Slot;
         let slots = t.slots(els);
         for (r, row) in rows.iter().enumerate() {
+            if r == 0 && header > 0 {
+                x.push_str("<table:table-header-rows>");
+            }
             x.push_str("<table:table-row>");
             for c in 0..ncols {
-                let span = match slots.get(r).and_then(|s| s.get(c)) {
+                let (span, sc, sr) = match slots.get(r).and_then(|s| s.get(c)) {
                     Some(Slot::Covered { .. }) => {
                         x.push_str("<table:covered-table-cell/>");
                         continue;
                     }
-                    Some(Slot::Anchor { cols, rows }) => format!(" table:number-columns-spanned=\"{cols}\" table:number-rows-spanned=\"{rows}\""),
-                    _ => String::new(),
+                    Some(Slot::Anchor { cols, rows }) => (format!(" table:number-columns-spanned=\"{cols}\" table:number-rows-spanned=\"{rows}\""), *cols, *rows),
+                    _ => (String::new(), 1, 1),
                 };
                 let inner = if c < row.len() {
                     let (a, b) = t.cell_range(els, r, c);
@@ -637,13 +662,45 @@ impl<'a> W<'a> {
                     String::new()
                 };
                 let inner = if inner.is_empty() { "<text:p/>".to_string() } else { inner };
+                let props = if plain {
+                    String::from("fo:padding=\"0.04in\" fo:border=\"0.5pt solid #000000\"")
+                } else {
+                    let cell = look.area(r, c, sc, sr);
+                    let mut p = padding.clone();
+                    for (k, side) in ["left", "right", "top", "bottom"].iter().enumerate() {
+                        p.push_str(&odf_border(side, cell.lines[k]));
+                    }
+                    if cell.shade {
+                        p.push_str(&format!(" fo:background-color=\"#{fill}\""));
+                    }
+                    p
+                };
+                let cell = self.reg(hdr).get("table-cell", "Cell", &format!("><style:table-cell-properties {props}/>"));
                 x.push_str(&format!("<table:table-cell table:style-name=\"{cell}\"{span} office:value-type=\"string\">{inner}</table:table-cell>"));
             }
             x.push_str("</table:table-row>");
+            if header > 0 && r + 1 == header {
+                x.push_str("</table:table-header-rows>");
+            }
         }
         x.push_str("</table:table>");
         x
     }
+}
+
+/// One side of a cell as ` fo:border-<side>="…"`.
+fn odf_border(side: &str, l: LineStyle) -> String {
+    let v = match l {
+        LineStyle::None => "none",
+        LineStyle::Single => "0.5pt solid #000000",
+        // LibreOffice wants the widths of line, gap, line as well
+        LineStyle::Double => return format!(" fo:border-{side}=\"1.5pt double #000000\" style:border-line-width-{side}=\"0.5pt 0.5pt 0.5pt\""),
+        LineStyle::Dashed => "0.5pt dashed #000000",
+        LineStyle::Dotted => "0.5pt dotted #000000",
+        LineStyle::Thick => "1.5pt solid #000000",
+        LineStyle::ExtraThick => "3pt solid #000000",
+    };
+    format!(" fo:border-{side}=\"{v}\"")
 }
 
 /// All the XML pieces of a document, assembled into a package or a flat file.
@@ -1084,6 +1141,12 @@ struct SInfo {
     tpr: Vec<(String, String)>,
     col_w: Option<i32>,
     tbl_brk: bool,
+    /// table: `table:align` and the left margin
+    tbl_align: Option<String>,
+    tbl_left: Option<i32>,
+    /// cell: lines, fill and padding (left, right, top, bottom)
+    cell: crate::fmt_build::CellIn,
+    cell_pad: [Option<i32>; 4],
 }
 
 fn sinfo(n: &Node) -> SInfo {
@@ -1114,7 +1177,20 @@ fn sinfo(n: &Node) -> SInfo {
             }
             "style:text-properties" => s.tpr = k.attrs.clone(),
             "style:table-column-properties" => s.col_w = k.attr("style:column-width").and_then(len_wpu),
-            "style:table-properties" => s.tbl_brk = k.attr("fo:break-before") == Some("page"),
+            "style:table-properties" => {
+                s.tbl_brk = k.attr("fo:break-before") == Some("page");
+                s.tbl_align = k.attr("table:align").map(String::from);
+                s.tbl_left = k.attr("fo:margin-left").and_then(len_wpu);
+            }
+            "style:table-cell-properties" => {
+                let all = k.attr("fo:border").and_then(crate::fmt_build::css_border);
+                let pad = k.attr("fo:padding").and_then(len_wpu);
+                for (i, side) in ["left", "right", "top", "bottom"].iter().enumerate() {
+                    s.cell.lines[i] = k.attr(&format!("fo:border-{side}")).and_then(crate::fmt_build::css_border).or(all);
+                    s.cell_pad[i] = k.attr(&format!("fo:padding-{side}")).and_then(len_wpu).or(pad);
+                }
+                s.cell.fill = k.attr("fo:background-color").and_then(crate::fmt_build::gray_of_hex);
+            }
             _ => {}
         }
     }
@@ -1932,16 +2008,22 @@ impl<'a> Rd<'a> {
     }
 
     fn table(&mut self, t: &Node) {
-        fn rows<'n>(n: &'n Node, out: &mut Vec<&'n Node>) {
+        // `header`: the number of rows at the top that stand in
+        // <table:table-header-rows>
+        fn rows<'n>(n: &'n Node, out: &mut Vec<&'n Node>, in_header: bool, header: &mut usize) {
             for c in n.nodes() {
                 match c.name.as_str() {
                     "table:table-row" => {
                         let rep = c.attr("table:number-rows-repeated").and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).clamp(1, 64);
                         for _ in 0..rep {
+                            if in_header && *header == out.len() {
+                                *header += 1;
+                            }
                             out.push(c);
                         }
                     }
-                    "table:table-header-rows" | "table:table-rows" | "table:table-row-group" => rows(c, out),
+                    "table:table-header-rows" => rows(c, out, true, header),
+                    "table:table-rows" | "table:table-row-group" => rows(c, out, in_header, header),
                     _ => {}
                 }
             }
@@ -1964,7 +2046,8 @@ impl<'a> Rd<'a> {
             }
         }
         let mut rv = vec![];
-        rows(t, &mut rv);
+        let mut tin = crate::fmt_build::TableIn::default();
+        rows(t, &mut rv, false, &mut tin.header_rows);
         if self.in_table > 0 {
             // WP tables cannot nest: flatten into tabs / lines
             self.sep(false);
@@ -1994,7 +2077,7 @@ impl<'a> Rd<'a> {
         self.els.push(El::Code(Code::TblDef { cols: vec![] }));
         self.in_table += 1;
         let mut max_cells = 0;
-        for row in &rv {
+        for (ri, row) in rv.iter().enumerate() {
             self.close_attrs();
             self.els.push(El::Code(Code::Row));
             let mut ncell = 0;
@@ -2004,10 +2087,18 @@ impl<'a> Rd<'a> {
                 let covered = cell.name == "table:covered-table-cell";
                 let span = |a: &str| cell.attr(a).and_then(|v| v.parse::<usize>().ok()).unwrap_or(1).clamp(1, 255) as u8;
                 let (sc, sr) = (span("table:number-columns-spanned"), span("table:number-rows-spanned"));
+                let style = cell.attr("table:style-name").and_then(|sn| self.s.get("table-cell", sn, self.hdr));
                 for _ in 0..rep {
                     self.close_attrs();
                     self.els.push(El::Code(Code::Cell));
                     self.need_sep = false;
+                    if let Some(st) = style {
+                        *tin.cell(ri, ncell) = st.cell;
+                        // the spacing of the table: that of its first cell
+                        if tin.pad.iter().all(|p| p.is_none()) {
+                            tin.pad = st.cell_pad;
+                        }
+                    }
                     if covered {
                         ncell += 1;
                         continue;
@@ -2036,9 +2127,22 @@ impl<'a> Rd<'a> {
             let w = rest / (ncols - widths.len()) as i32;
             widths.resize(ncols, w);
         }
+        // position: "margins" (as wide as the text) is how LibreOffice
+        // makes every table, with columns that fill the width; it only
+        // counts as Full when the columns do not fill it themselves
+        let style = t.attr("table:style-name").and_then(|sn| self.s.get("table", sn, self.hdr));
+        let total: i32 = widths.iter().sum();
+        tin.pos = match style.and_then(|i| i.tbl_align.as_deref()) {
+            Some("center") => Some(TblPos::Center),
+            Some("right") => Some(TblPos::Right),
+            Some("margins") if (total - text_w).abs() > text_w / 100 => Some(TblPos::Full),
+            Some("left") => style.and_then(|i| i.tbl_left).filter(|m| m.abs() > 20).map(|m| TblPos::Set((self.init.left + m).max(0))),
+            _ => None,
+        };
         if let El::Code(Code::TblDef { cols }) = &mut self.els[def_at] {
             *cols = widths;
         }
+        crate::fmt_build::apply_table_in(&mut self.els, def_at, &tin);
         self.need_sep = false;
     }
 }
@@ -2442,6 +2546,32 @@ mod tests {
         let d2 = read_odt(&bytes).unwrap();
         crate::rtf::tests::same_joins(&d, &d2);
         assert_eq!(d2.els, d.els);
+    }
+
+    #[test]
+    fn table_lines_and_options_roundtrip() {
+        use crate::fmt_build::testkit::*;
+        for pos in POSITIONS {
+            let d = lines_doc(some_opt(pos));
+            let bytes = write_odt(&d).unwrap();
+            let xml = part(&bytes, "content.xml");
+            assert!(xml.contains("<table:table-header-rows><table:table-row>") && xml.matches("</table:table-row>").count() == 4, "{xml}");
+            assert_eq!(xml.matches("fo:background-color=\"#BFBFBF\"").count(), 2, "{xml}");
+            assert!(xml.contains("fo:border-top=\"1.5pt solid #000000\"") && xml.contains("fo:border-right=\"3pt solid #000000\"") && xml.contains("fo:border-left=\"none\""), "{xml}");
+            assert!(xml.contains("fo:padding-left=\"0.0500in\" fo:padding-right=\"0.1500in\" fo:padding-top=\"0.0250in\""), "{xml}");
+            let d2 = read_odt(&bytes).unwrap();
+            assert_same_look(&d, &d2);
+            let (a, b) = (def_of(&d), def_of(&d2));
+            assert_eq!(d2.els[b], d.els[a]);
+        }
+        let d = lines_doc(TblOpt::default());
+        let d2 = read_odt(&write_odt(&d).unwrap()).unwrap();
+        assert_same_look(&d, &d2);
+        assert!(!d2.els.iter().any(|e| matches!(e, El::Code(Code::TblOpt(_)))));
+        // a plain table is written as before and comes back without codes
+        let d = table_doc();
+        let xml = part(&write_odt(&d).unwrap(), "content.xml");
+        assert!(xml.contains("<style:table-cell-properties fo:padding=\"0.04in\" fo:border=\"0.5pt solid #000000\"/>") && !xml.contains("fo:border-left") && !xml.contains("header-rows"), "{xml}");
     }
 
     #[test]

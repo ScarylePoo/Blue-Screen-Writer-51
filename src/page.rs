@@ -162,6 +162,8 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
     let mut adv_dy = 0i32;
     let mut adv_page = 0u32;
     let page_size = |n: u32| crate::fmtlayout::paper_size(init, layout.page_paper.get(n as usize - 1).unwrap_or(&None));
+    // per line: its page and the runs it gave (for repeated table headers)
+    let mut line_runs: Vec<(usize, usize, usize)> = Vec::with_capacity(layout.lines.len());
     for line in &layout.lines {
         while pages.len() < line.page as usize {
             let n = pages.len() as u32 + 1;
@@ -194,6 +196,7 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
             scan += 1;
         }
         let page = &mut pages[line.page as usize - 1];
+        let first_run = page.runs.len();
         let _ = (left, bottom);
         // baseline ≈ top + 0.8 × line height (single spacing component)
         let base_h = (font.size_cpt as i64 * 12 / 72) as i32;
@@ -418,52 +421,19 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
         if let Some(r) = run.take() {
             page.runs.push(r);
         }
+        line_runs.push((line.page as usize - 1, first_run, page.runs.len()));
         attrs = cur_attrs;
         font = cur_font;
         scan = scan.max(line.end);
     }
+    table_headers(layout, &mut pages, &line_runs);
     if pages.is_empty() {
         let (w, h) = page_size(1);
         pages.push(Page { number: 1, width: w, height: h, runs: vec![], rules: vec![], images: vec![] });
     }
     // Center Page (top to bottom), line numbering, redline method
     crate::fmtpage::body_effects(doc, layout, &infos, &mut pages, m);
-    // table rules
-    {
-        use crate::layout::{BORDER_H, BorderKind, VRow};
-        let mut prev_border: Option<(usize, usize)> = None; // (vrow, table)
-        for (v, vr) in layout.vrows.iter().enumerate() {
-            if let VRow::Border { table, kind, row } = vr {
-                let geom = &layout.tables[*table];
-                let xs = &geom.x;
-                let pg = layout.vrow_page.get(v).copied().unwrap_or(1) as usize;
-                let y = layout.vrow_y.get(v).copied().unwrap_or(0) + BORDER_H / 2;
-                let outer = *kind != BorderKind::Mid;
-                if let Some(p) = pages.get_mut(pg - 1) {
-                    let th = if outer { 12 } else { 6 };
-                    // (no rule inside a joined cell)
-                    for c in 0..xs.len() - 1 {
-                        if outer || geom.rule_h(*row - 1, c) {
-                            p.rules.push((xs[c], y, xs[c + 1] - xs[c] + th, th));
-                        }
-                    }
-                    if let Some((pv, pt)) = prev_border {
-                        if pt == *table && layout.vrow_page.get(pv) == layout.vrow_page.get(v) {
-                            let y0 = layout.vrow_y[pv] + BORDER_H / 2;
-                            for (k, x) in xs.iter().enumerate() {
-                                if !geom.rule_v(*row - 1, k) {
-                                    continue;
-                                }
-                                let th = if k == 0 || k == xs.len() - 1 { 12 } else { 6 };
-                                p.rules.push((*x, y0, th, y - y0));
-                            }
-                        }
-                    }
-                }
-                prev_border = if *kind == BorderKind::Bottom { None } else { Some((v, *table)) };
-            }
-        }
-    }
+    table_lines(layout, &mut pages);
     crate::gfx::draw(doc, layout, &mut pages, m);
     // headers, footers and footnotes
     for p in pages.iter_mut() {
@@ -540,4 +510,302 @@ fn build_pages_flat(doc: &Document, layout: &Layout, m: &dyn crate::layout::Metr
     let _ = (pgnum_pos, page_offset);
     crate::fmtpage::page_numbers(doc, layout, &infos, &mut pages, m, &font);
     pages
+}
+
+// ---------------------------------------------------------------- tables
+
+/// Is this repeat of header rows still what the layout holds?  (Text
+/// columns regroup the visual rows after pagination.)
+fn repeat_ok(layout: &Layout, rp: &crate::layout::TblRepeat) -> bool {
+    use crate::layout::{BorderKind, VRow};
+    rp.last_v < layout.vrows.len()
+        && rp.last_v < layout.vrow_y.len()
+        && matches!(layout.vrows.get(rp.first_v), Some(VRow::Border { table, kind: BorderKind::Top, .. }) if *table == rp.table)
+}
+
+/// The text of table header rows, printed again on the pages their table
+/// continues on (Table Edit, 4 Header).
+fn table_headers(layout: &Layout, pages: &mut [Page], line_runs: &[(usize, usize, usize)]) {
+    use crate::layout::VRow;
+    for rp in layout.tbl_repeats.iter().filter(|rp| repeat_ok(layout, rp)) {
+        let dy = rp.y - layout.vrow_y[rp.first_v];
+        let mut copies: Vec<Run> = vec![];
+        for v in rp.first_v..=rp.last_v {
+            let VRow::Lines(ls) = &layout.vrows[v] else { continue };
+            for &li in ls {
+                let Some(&(pg, a, b)) = line_runs.get(li) else { continue };
+                let Some(p) = pages.get(pg) else { continue };
+                copies.extend(p.runs[a.min(p.runs.len())..b.min(p.runs.len())].iter().cloned().map(|mut r| {
+                    r.y += dy;
+                    r
+                }));
+            }
+        }
+        if let Some(p) = pages.get_mut(rp.page as usize - 1) {
+            p.runs.extend(copies);
+        }
+    }
+}
+
+/// Stroke width and, for a double line, how far its two strokes are from
+/// the middle (WPU).
+fn rule_strokes(style: LineStyle) -> (i32, &'static [i32]) {
+    match style {
+        LineStyle::None => (0, &[]),
+        LineStyle::Single | LineStyle::Dashed => (6, &[0]),
+        LineStyle::Dotted => (8, &[0]),
+        LineStyle::Double => (6, &[-6, 6]),
+        LineStyle::Thick => (30, &[0]),
+        LineStyle::ExtraThick => (54, &[0]),
+    }
+}
+
+/// Half of the room a line takes across.
+fn rule_half(style: LineStyle) -> i32 {
+    let (w, offs) = rule_strokes(style);
+    offs.iter().map(|o| o.abs()).max().unwrap_or(0) + w / 2
+}
+
+/// The lines that meet one end of a table line: the one straight ahead
+/// and the two at right angles (above / below a horizontal line, left /
+/// right of a vertical one).
+#[derive(Clone, Copy)]
+struct Meet {
+    opp: LineStyle,
+    before: LineStyle,
+    after: LineStyle,
+}
+
+const NO_MEET: Meet = Meet { opp: LineStyle::None, before: LineStyle::None, after: LineStyle::None };
+
+/// One table line as filled rectangles: from `from` to `to` along its
+/// direction, centred on `mid` across.  The ends are fitted to the lines
+/// they meet (corners close; lines stop at a double line they run into).
+fn table_rule(p: &mut Page, horizontal: bool, style: LineStyle, mid: i32, from: i32, to: i32, m0: Meet, m1: Meet) {
+    let (w, offs) = rule_strokes(style);
+    let double = style == LineStyle::Double;
+    // how far a stroke on side `off` is pulled back from the meeting point
+    let trim = |m: &Meet, off: i32| -> i32 {
+        let (a, b) = if off < 0 { (m.before, m.after) } else { (m.after, m.before) };
+        match crate::grid::rule_end(double, m.opp != LineStyle::None, a == LineStyle::Double, b == LineStyle::Double) {
+            1 => 3,
+            -1 => -rule_half(LineStyle::Double),
+            // an end without a line straight ahead reaches under the
+            // lines it meets
+            _ if m.opp == LineStyle::None => -[m.before, m.after].iter().filter(|s| **s != LineStyle::Double).map(|s| rule_half(*s)).max().unwrap_or(0),
+            _ => 0,
+        }
+    };
+    for &off in offs {
+        let (a, b) = (from + trim(&m0, off), to - trim(&m1, off));
+        let across = mid + off - w / 2;
+        let mut piece = |a: i32, b: i32| {
+            if b > a {
+                p.rules.push(if horizontal { (a, across, b - a, w) } else { (across, a, w, b - a) });
+            }
+        };
+        // (on, period) of dashes and dots
+        let pattern = match style {
+            LineStyle::Dashed => Some((60, 100)),
+            LineStyle::Dotted => Some((8, 24)),
+            _ => None,
+        };
+        match pattern {
+            None => piece(a, b),
+            Some((on, period)) => {
+                let mut x = a;
+                while x < b {
+                    piece(x, (x + on).min(b));
+                    x += period;
+                }
+            }
+        }
+    }
+}
+
+/// Table lines and shading, and the lines of repeated header rows.
+fn table_lines(layout: &Layout, pages: &mut [Page]) {
+    use crate::layout::{BorderKind, TableGeom, VRow};
+    let none = LineStyle::None;
+    // the border in front of row `b` (0 = top of the table) at height `y`
+    let border = |pages: &mut [Page], geom: &TableGeom, pg: usize, b: usize, y: i32| {
+        let Some(p) = pages.get_mut(pg - 1) else { return };
+        let ncols = geom.x.len() - 1;
+        let nrows = geom.rows.len();
+        let h = |c: usize| geom.line_above(b, c);
+        // the lines above and below the border at boundary k
+        let up = |k: usize| if b > 0 { geom.style_v(b - 1, k) } else { none };
+        let down = |k: usize| if b < nrows { geom.style_v(b, k) } else { none };
+        for c in 0..ncols {
+            let m0 = Meet { opp: if c > 0 { h(c - 1) } else { none }, before: up(c), after: down(c) };
+            let m1 = Meet { opp: if c + 1 < ncols { h(c + 1) } else { none }, before: up(c + 1), after: down(c + 1) };
+            table_rule(p, true, h(c), y, geom.x[c], geom.x[c + 1], m0, m1);
+        }
+    };
+    // row `r` between `y0` and `y1`: its shading and the lines beside its
+    // cells; `b0` / `b1`: the borders it reaches from and to (None: the
+    // row is cut off by the page)
+    let span = |pages: &mut [Page], geom: &TableGeom, pg: usize, r: usize, y0: i32, y1: i32, b0: Option<usize>, b1: Option<usize>| {
+        let Some(p) = pages.get_mut(pg - 1) else { return };
+        if y1 <= y0 {
+            return;
+        }
+        let ncols = geom.x.len() - 1;
+        let nrows = geom.rows.len();
+        if geom.gray > 0 {
+            let color = (geom.gray.min(100) as u32 * 255 / 100) << 24;
+            let mut c = 0;
+            while c < ncols {
+                // (cells side by side as one area)
+                let c0 = c;
+                while c < ncols && geom.shaded(r, c) {
+                    c += 1;
+                }
+                if c > c0 {
+                    p.images.push(crate::raster::Placed::solid(geom.x[c0], y0, geom.x[c] - geom.x[c0], y1 - y0, color));
+                } else {
+                    c += 1;
+                }
+            }
+        }
+        let meet = |b: Option<usize>, k: usize, top: bool| match b {
+            None => NO_MEET,
+            Some(b) => Meet {
+                opp: if top {
+                    if b > 0 { geom.style_v(b - 1, k) } else { none }
+                } else if b < nrows {
+                    geom.style_v(b, k)
+                } else {
+                    none
+                },
+                before: if k > 0 { geom.line_above(b, k - 1) } else { none },
+                after: if k < ncols { geom.line_above(b, k) } else { none },
+            },
+        };
+        for k in 0..=ncols {
+            table_rule(p, false, geom.style_v(r, k), geom.x[k], y0, y1, meet(b0, k, true), meet(b1, k, false));
+        }
+    };
+    /// The table row being drawn.
+    struct Open {
+        table: usize,
+        row: usize,
+        page: usize,
+        y0: i32,
+        /// the border at `y0` (None: top of a page)
+        b0: Option<usize>,
+        /// text of the row stands on this page
+        lines: bool,
+    }
+    let mut cur: Option<Open> = None;
+    let mut prev_bottom = 0;
+    for (v, vr) in layout.vrows.iter().enumerate() {
+        let pg = layout.vrow_page.get(v).copied().unwrap_or(1) as usize;
+        let y = layout.vrow_y.get(v).copied().unwrap_or(0);
+        if matches!(vr, VRow::Gap(_)) {
+            continue;
+        }
+        let at_border = matches!(vr, VRow::Border { .. });
+        // the table goes on on another page
+        if let Some(o) = cur.take_if(|o| o.page != pg) {
+            let geom = &layout.tables[o.table];
+            if o.lines {
+                span(pages, geom, o.page, o.row, o.y0, prev_bottom, o.b0, None);
+            }
+            // the header rows again
+            let mut next = (!at_border).then_some(Open { table: o.table, row: o.row, page: pg, y0: y, b0: None, lines: false });
+            if let Some(rp) = layout.tbl_repeats.iter().find(|rp| rp.table == o.table && rp.page as usize == pg && repeat_ok(layout, rp)) {
+                let dy = rp.y - layout.vrow_y[rp.first_v];
+                let mut head: Option<Open> = None;
+                for hv in rp.first_v..=rp.last_v {
+                    if let VRow::Border { kind, row: b, .. } = &layout.vrows[hv] {
+                        let hy = layout.vrow_y[hv] + geom.rule_offset(*kind) + dy;
+                        if let Some(h) = head.take() {
+                            span(pages, geom, pg, h.row, h.y0, hy, h.b0, Some(*b));
+                        }
+                        border(pages, geom, pg, *b, hy);
+                        head = Some(Open { table: o.table, row: *b, page: pg, y0: hy, b0: Some(*b), lines: false });
+                    }
+                }
+                if let Some(h) = head {
+                    // text follows: the row that was cut goes on below the
+                    // last header line; a line follows: it closes the
+                    // last header row
+                    next = Some(if at_border { h } else { Open { row: o.row, ..h } });
+                }
+            }
+            cur = next;
+        }
+        match vr {
+            VRow::Border { table, kind, row } => {
+                let geom = &layout.tables[*table];
+                let yy = y + geom.rule_offset(*kind);
+                if let Some(o) = cur.take() {
+                    if o.table == *table {
+                        span(pages, geom, pg, o.row, o.y0, yy, o.b0, Some(*row));
+                    }
+                }
+                border(pages, geom, pg, *row, yy);
+                if *kind != BorderKind::Bottom {
+                    cur = Some(Open { table: *table, row: *row, page: pg, y0: yy, b0: Some(*row), lines: false });
+                }
+                prev_bottom = y + geom.border_height(*kind);
+            }
+            VRow::Lines(ls) => {
+                if let Some(o) = cur.as_mut() {
+                    o.lines = true;
+                }
+                prev_bottom = y + ls.iter().filter_map(|&li| layout.lines.get(li)).map(|l| l.height).max().unwrap_or(0);
+            }
+            VRow::Gap(_) => {}
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn meet(opp: LineStyle, before: LineStyle, after: LineStyle) -> Meet {
+        Meet { opp, before, after }
+    }
+
+    #[test]
+    fn table_rules() {
+        use LineStyle::{Dashed, Dotted, Double, ExtraThick, Single, Thick};
+        let none = LineStyle::None;
+        let draw = |horizontal, style, m0, m1| {
+            let mut p = Page::default();
+            table_rule(&mut p, horizontal, style, 1000, 2000, 3000, m0, m1);
+            p.rules
+        };
+        // no line, a thin one, the thick ones (centred on 1000)
+        assert!(draw(true, none, NO_MEET, NO_MEET).is_empty());
+        assert_eq!(draw(true, Single, NO_MEET, NO_MEET), vec![(2000, 997, 1000, 6)]);
+        assert_eq!(draw(false, Thick, NO_MEET, NO_MEET), vec![(985, 2000, 30, 1000)]);
+        assert_eq!(draw(true, ExtraThick, NO_MEET, NO_MEET), vec![(2000, 973, 1000, 54)]);
+        // double: two thin rules
+        assert_eq!(draw(true, Double, NO_MEET, NO_MEET), vec![(2000, 991, 1000, 6), (2000, 1003, 1000, 6)]);
+        // dashes and dots end with the line
+        let dashes = draw(true, Dashed, NO_MEET, NO_MEET);
+        assert_eq!(dashes.len(), 10);
+        assert_eq!((dashes[0], dashes[9]), ((2000, 997, 60, 6), (2900, 997, 60, 6)));
+        let dots = draw(false, Dotted, NO_MEET, NO_MEET);
+        assert_eq!(dots.len(), 42);
+        assert!(dots.iter().all(|r| r.1 + r.3 <= 3000 && r.2 == 8));
+        // the top left corner of a double frame: the outer stroke goes
+        // round the outside, the inner one starts at the inner stroke of
+        // the line going down
+        let corner = meet(none, none, Double);
+        assert_eq!(draw(true, Double, corner, NO_MEET), vec![(1991, 991, 1009, 6), (2003, 1003, 997, 6)]);
+        // a single line running into a double one stops at its near stroke
+        // (both ends), one that goes on straight is not cut
+        let into = meet(none, Double, Double);
+        assert_eq!(draw(true, Single, into, into), vec![(2003, 997, 994, 6)]);
+        let through = meet(Single, Double, Double);
+        assert_eq!(draw(true, Single, through, NO_MEET), vec![(2000, 997, 1000, 6)]);
+        // a corner of single lines closes; so does one with a thick line
+        assert_eq!(draw(true, Single, meet(none, none, Single), NO_MEET), vec![(1997, 997, 1003, 6)]);
+        assert_eq!(draw(true, Single, meet(none, Thick, none), NO_MEET), vec![(1985, 997, 1015, 6)]);
+    }
 }

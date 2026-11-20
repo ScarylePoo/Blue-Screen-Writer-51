@@ -1,6 +1,6 @@
 # Open items
 
-State of version 1.4.0 (2026-11-20).  Everything in the original feature backlog
+State of version 1.5.0 (2026-11-20).  Everything in the original feature backlog
 (autosave and crash recovery, revisions, track changes, mouse, columns, graphics,
 styles, outlines, merge/sort, mark text, RTL and CJK, Linux/macOS builds, home
 directory) is done.
@@ -10,7 +10,7 @@ They show "not available yet in this version" or do nothing (also listed in the
 manual, Troubleshooting and FAQ):
 - Ctrl-F8, 5 Print Color
 - Ctrl-F7: footnote/endnote 3 New Number and 4 Options; 3 Endnote Placement
-- Table Edit: 3 Lines, 4 Header, 6 Options; Move/Copy in Table Edit
+- Table Edit: Move/Copy in Table Edit
 - Tables: nested tables (a table in a cell) from Word are flattened to text; text of a cell joined downwards does not flow into the rows below (the first row grows)
 - Ctrl-F4 with Block: 2 Tabular Column, 3 Rectangle; without Block: 4 Append
 - Shift-F7: 7 Initialize Printer; changing B, U, G, T on the Print screen

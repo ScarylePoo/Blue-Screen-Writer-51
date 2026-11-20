@@ -139,11 +139,14 @@ pub struct Form {
     pub footer: String,
     /// Screen column of the values (WP: 44 on most Format screens).
     pub value_col: usize,
+    /// The first label of an item with several is a heading without a
+    /// value of its own (Table Options: Spacing Between Text and Lines).
+    pub headings: bool,
 }
 
 impl Form {
     pub fn new(title: &str, items: Vec<Item>) -> Box<Form> {
-        Box::new(Form { title: title.into(), items, editing: None, choice: None, footer: "Selection: 0".into(), value_col: 44 })
+        Box::new(Form { title: title.into(), items, editing: None, choice: None, footer: "Selection: 0".into(), value_col: 44, headings: false })
     }
 }
 
@@ -213,7 +216,8 @@ impl Screen for Form {
                     }
                 }
                 Input::Func(Func::Up) => {
-                    if *sub > 0 {
+                    let first = (self.headings && bufs.len() > 1) as usize;
+                    if *sub > first {
                         *sub -= 1;
                         *fresh = true;
                     }
@@ -264,7 +268,8 @@ impl Screen for Form {
                     match &self.items[k].edit {
                         Edit::Fields(_) => {
                             let vals = (self.items[k].value)(wp);
-                            self.editing = Some((k, 0, vals, true));
+                            let first = (self.headings && vals.len() > 1) as usize;
+                            self.editing = Some((k, first, vals, true));
                         }
                         Edit::YesNo(f) => {
                             let f = f.clone();

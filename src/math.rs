@@ -296,12 +296,14 @@ pub fn calc_table(els: &mut Vec<El>, def: usize) {
         }
     }
     // write the values, last cell first (indices shift)
+    let paren = tables::opt_at(els, def).neg_paren;
     let mut cells: Vec<_> = results.into_iter().collect();
     cells.sort_by(|a, b| b.0.cmp(&a.0));
     for ((r, c), v) in cells {
         let (a, b) = t.cell_range(els, r, c);
         let text = match v {
-            Some(x) => fmt_num(x, 2, false),
+            // (Table Options: Display Negative Results)
+            Some(x) => fmt_num(x, 2, paren),
             None => "??".into(),
         };
         let mut keep: Vec<El> = els[a..b].iter().filter(|e| matches!(e, El::Code(c) if !matches!(c, Code::HRt | Code::Tab | Code::HardSpace | Code::HardHyphen))).cloned().collect();
@@ -837,5 +839,21 @@ mod tests {
         calc_columns(&mut els);
         d.els = els;
         assert_eq!(d.plain_text(0, d.len()), t);
+    }
+
+    #[test]
+    fn table_negative_results() {
+        // Table Options, 2 Display Negative Results
+        let mut els = table(&[&["5", "8", "=A1-B1"], &["1", "=C1*2", "=B2+A2"]]);
+        calc_table(&mut els, 0);
+        assert_eq!((cell(&els, 0, 2), cell(&els, 1, 1), cell(&els, 1, 2)), ("-3.00".into(), "-6.00".into(), "-5.00".into()));
+        els.insert(1, El::Code(Code::TblOpt(TblOpt { neg_paren: true, ..Default::default() })));
+        calc_table(&mut els, 0);
+        assert_eq!((cell(&els, 0, 2), cell(&els, 1, 1), cell(&els, 1, 2)), ("(3.00)".into(), "(6.00)".into(), "(5.00)".into()));
+        // positive results stay as they are
+        let mut els = table(&[&["5", "8", "=A1+B1"]]);
+        els.insert(1, El::Code(Code::TblOpt(TblOpt { neg_paren: true, ..Default::default() })));
+        calc_table(&mut els, 0);
+        assert_eq!(cell(&els, 0, 2), "13.00");
     }
 }

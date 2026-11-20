@@ -119,77 +119,106 @@ impl Renderer {
     /// Box-drawing and block characters are drawn geometrically so they
     /// join seamlessly across cells, like on a real text-mode screen.
     fn draw_box_char(buf: &mut [u32], stride: usize, x0: usize, y0: usize, cw: usize, ch_: usize, c: char, fg: u32) -> bool {
-        let (l, r, u, d, dbl) = match c {
-            '─' => (1, 1, 0, 0, false),
-            '│' => (0, 0, 1, 1, false),
-            '┌' => (0, 1, 0, 1, false),
-            '┐' => (1, 0, 0, 1, false),
-            '└' => (0, 1, 1, 0, false),
-            '┘' => (1, 0, 1, 0, false),
-            '├' => (0, 1, 1, 1, false),
-            '┤' => (1, 0, 1, 1, false),
-            '┬' => (1, 1, 0, 1, false),
-            '┴' => (1, 1, 1, 0, false),
-            '┼' => (1, 1, 1, 1, false),
-            '═' => (1, 1, 0, 0, true),
-            '║' => (0, 0, 1, 1, true),
-            '╔' => (0, 1, 0, 1, true),
-            '╗' => (1, 0, 0, 1, true),
-            '╚' => (0, 1, 1, 0, true),
-            '╝' => (1, 0, 1, 0, true),
-            '╠' => (0, 1, 1, 1, true),
-            '╣' => (1, 0, 1, 1, true),
-            '╦' => (1, 1, 0, 1, true),
-            '╩' => (1, 1, 1, 0, true),
-            '╬' => (1, 1, 1, 1, true),
+        let t = (ch_ / 16).max(1);
+        let cx = x0 + cw / 2;
+        let cy = y0 + ch_ / 2;
+        // a filled rectangle, clipped to the cell
+        let mut rect = |xa: usize, ya: usize, xb: usize, yb: usize| {
+            for y in ya.max(y0)..yb.min(y0 + ch_) {
+                for x in xa.max(x0)..xb.min(x0 + cw) {
+                    buf[y * stride + x] = fg;
+                }
+            }
+        };
+        // arms to the left, right, up, down: 0 none, 1 single, 2 double
+        let (l, r, u, d): (u8, u8, u8, u8) = match c {
+            '─' => (1, 1, 0, 0),
+            '│' => (0, 0, 1, 1),
+            '═' => (2, 2, 0, 0),
+            '║' => (0, 0, 2, 2),
             '█' | '▀' | '▄' | '▌' | '▐' => {
-                let (fx0, fy0, fx1, fy1) = match c {
-                    '█' => (0, 0, cw, ch_),
-                    '▀' => (0, 0, cw, ch_ / 2),
-                    '▄' => (0, ch_ / 2, cw, ch_),
-                    '▌' => (0, 0, cw / 2, ch_),
-                    _ => (cw / 2, 0, cw, ch_),
-                };
-                for y in fy0..fy1 {
-                    for x in fx0..fx1 {
-                        buf[(y0 + y) * stride + x0 + x] = fg;
+                match c {
+                    '█' => rect(x0, y0, x0 + cw, y0 + ch_),
+                    '▀' => rect(x0, y0, x0 + cw, y0 + ch_ / 2),
+                    '▄' => rect(x0, y0 + ch_ / 2, x0 + cw, y0 + ch_),
+                    '▌' => rect(x0, y0, x0 + cw / 2, y0 + ch_),
+                    _ => rect(x0 + cw / 2, y0, x0 + cw, y0 + ch_),
+                }
+                return true;
+            }
+            // table lines: thick and extra thick
+            '━' | '▬' => {
+                let th = if c == '━' { 3 * t } else { (6 * t).min(ch_ / 2).max(3 * t + 1) };
+                let top = cy + t / 2 - th / 2;
+                rect(x0, top, x0 + cw, top + th);
+                return true;
+            }
+            '┃' | '▮' => {
+                let th = if c == '┃' { 3 * t } else { (6 * t).min(cw * 2 / 3).max(3 * t + 1) };
+                let left = (cx + t / 2).saturating_sub(th / 2);
+                rect(left, y0, left + th, y0 + ch_);
+                return true;
+            }
+            // … dashed (two dashes a cell) and dotted (four dots)
+            '╌' | '┈' => {
+                let (period, on) = if c == '╌' { ((cw / 2).max(2), (cw / 3).max(1)) } else { ((cw / 4).max(2), (cw / 8).max(1)) };
+                for x in 0..cw {
+                    if x % period < on {
+                        rect(x0 + x, cy, x0 + x + 1, cy + t);
                     }
                 }
                 return true;
             }
+            '╎' | '┊' => {
+                let (period, on) = if c == '╎' { ((ch_ / 2).max(2), (ch_ / 3).max(1)) } else { ((ch_ / 4).max(2), (ch_ / 8).max(1)) };
+                for y in 0..ch_ {
+                    if y % period < on {
+                        rect(cx, y0 + y, cx + t, y0 + y + 1);
+                    }
+                }
+                return true;
+            }
+            '\u{2500}'..='\u{257f}' => {
+                let Some((arms, k)) = BOX_SETS.iter().find_map(|(arms, set)| set.iter().position(|x| *x == c).map(|k| (arms, k))) else { return false };
+                let (h, v) = (1 + (k & 1) as u8, 1 + (k >> 1) as u8);
+                (arms[0] as u8 * h, arms[1] as u8 * h, arms[2] as u8 * v, arms[3] as u8 * v)
+            }
             _ => return false,
         };
-        let t = (ch_ / 16).max(1);
-        let cx = x0 + cw / 2;
-        let cy = y0 + ch_ / 2;
-        let mut hline = |y: usize, xa: usize, xb: usize| {
-            for x in xa..xb {
-                for k in 0..t {
-                    buf[(y + k) * stride + x] = fg;
+        // the two strokes of a double line are `gap` away from the middle
+        let gap = (t * 2) as isize;
+        let strokes = |style: u8| -> &'static [isize] { if style == 2 { &[-1, 1] } else { &[0] } };
+        // where a stroke ends at the middle of the cell (see `rule_end`)
+        let end = |arm: u8, side: isize, opp: u8, before: u8, after: u8| -> isize {
+            let (a, b) = if side < 0 { (before, after) } else { (after, before) };
+            rule_end(arm == 2, opp != 0, a == 2, b == 2) as isize * gap
+        };
+        let (cxi, cyi) = (cx as isize, cy as isize);
+        for (arm, opp, left) in [(l, r, true), (r, l, false)] {
+            if arm == 0 {
+                continue;
+            }
+            for &side in strokes(arm) {
+                let y = (cyi + side * gap) as usize;
+                let e = end(arm, side, opp, u, d);
+                if left {
+                    rect(x0, y, (cxi - e) as usize + t, y + t);
+                } else {
+                    rect((cxi + e) as usize, y, x0 + cw, y + t);
                 }
             }
-        };
-        let gap = if dbl { t * 2 } else { 0 };
-        let offs: &[isize] = if dbl { &[-(gap as isize), gap as isize] } else { &[0] };
-        for &o in offs {
-            let y = (cy as isize + o) as usize;
-            // for doubles, inner corner lines shorten — approximate
-            if l == 1 {
-                hline(y, x0, cx + t);
-            }
-            if r == 1 {
-                hline(y, cx, x0 + cw);
-            }
         }
-        for &o in offs {
-            let x = (cx as isize + o) as usize;
-            let ya = if u == 1 { y0 } else { cy };
-            let yb = if d == 1 { y0 + ch_ } else { cy + t };
-            if u == 1 || d == 1 {
-                for y in ya..yb {
-                    for k in 0..t {
-                        buf[y * stride + x + k] = fg;
-                    }
+        for (arm, opp, up) in [(u, d, true), (d, u, false)] {
+            if arm == 0 {
+                continue;
+            }
+            for &side in strokes(arm) {
+                let x = (cxi + side * gap) as usize;
+                let e = end(arm, side, opp, l, r);
+                if up {
+                    rect(x, y0, x + t, (cyi - e) as usize + t);
+                } else {
+                    rect(x, (cyi + e) as usize, x + t, y0 + ch_);
                 }
             }
         }

@@ -45,7 +45,10 @@ Ctrl-Arrows Column Widths; Ins Insert; Del Delete; Move Copy;
 | **Del** | Delete rows or columns: choose 1 Rows or 2 Columns, then type how many, starting at the cursor. |
 | **1 Size** | Set the total number of rows or columns. Rows and columns are added or removed at the end of the table. |
 | **2 Format** | Justification of 1 Cell or 2 Column: Left, Center, Right or Full. |
+| **3 Lines** | The lines of the current cell, or of the blocked cells: **1 Left; 2 Right; 3 Top; 4 Bottom; 5 Inside; 6 Outside; 7 All**, then the kind of line: **1 None; 2 Single; 3 Double; 4 Dashed; 5 Dotted; 6 Thick; 7 Extra Thick**. **8 Shade** switches gray shading of the cells On or Off. With a block, Left, Right, Top, Bottom and Outside mean the edges of the block as a whole, and Inside the lines between its cells. |
+| **4 Header** | `Number of header rows:` the first rows of the table are repeated at the top of every following page when the table runs over a page break (in print, View Document and PDF; the edit screen does not show the repeated rows). 0 switches it off. |
 | **5 Math** | Table formulas (see below). |
+| **6 Options** | The Table Options screen (see below). |
 | **Alt-F4** (Block) | Start marking cells for Join: move to the last cell with the arrow keys. Esc switches Block off. |
 | **7 Join** | Joins the blocked cells into one cell (across, down, or both). Answer **Y** to `Join cells? No (Yes)`. The text of all the cells is collected in the first one. |
 | **8 Split** | With the cursor in a joined cell: separates it into single cells again. The text stays in the first cell. |
@@ -55,7 +58,20 @@ A joined cell shows `[Join:2x1]` (columns x rows) in Reveal Codes. The cursor, T
 
 All editing in a table can be undone with **Ctrl-Z**, one cell or one Table Edit step at a time. A Block that covers only part of a table deletes or copies the text of the cells, not the table's structure; block the whole table (from before it to after it) to delete or move the table itself.
 
-*Not available in this version:* 3 Lines, 4 Header, 6 Options, and Move/Copy inside Table Edit. Every table is shown with a full grid of lines. A table inside a table cell (from a Word file) is shown as text.
+A new table has double lines around it and single lines inside. Cells with their own lines show `[Cell Lines:…]` in Reveal Codes; where two cells share a line, the setting made last wins.
+
+#### Table Options (6)
+
+| Choice | What it does |
+|---|---|
+| **1 Spacing Between Text and Lines** | The space left, right, above and below the text in every cell. |
+| **2 Display Negative Results** | 1 with minus signs (-3.00) or 2 with parentheses ((3.00)) in table math. |
+| **3 Position of Table** | 1 Left, 2 Right, 3 Center, 4 Full (the columns are stretched to fill the margins), or 5 Set Position (a distance from the left edge of the paper). |
+| **4 Gray Shading (% of black)** | How dark shaded cells are (standard 10%). |
+
+The table's settings show as `[Tbl Opt:…]` after `[Tbl Def]` in Reveal Codes. F7 returns to Table Edit.
+
+*Not available in this version:* Move/Copy inside Table Edit. A table inside a table cell (from a Word file) is shown as text. A header is not repeated for tables inside text columns.
 
 ### Table math
 

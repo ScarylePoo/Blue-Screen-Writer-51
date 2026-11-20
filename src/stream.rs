@@ -144,6 +144,23 @@ pub fn code_to_str(c: &Code) -> String {
         Code::TblDef { cols } => format!("Tbl|{}", cols.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(",")),
         Code::Row => "Row".into(),
         Code::Join { cols, rows } => format!("Join|{cols}|{rows}"),
+        // TblOpt|header rows|left|right|top|bottom|neg ()|position|offset|gray
+        Code::TblOpt(o) => {
+            let (pos, x) = match o.pos {
+                TblPos::Left => ('L', 0),
+                TblPos::Right => ('R', 0),
+                TblPos::Center => ('C', 0),
+                TblPos::Full => ('F', 0),
+                TblPos::Set(x) => ('S', x),
+            };
+            format!("TblOpt|{}|{}|{}|{}|{}|{}|{pos}|{x}|{}", o.header_rows, o.pad[0], o.pad[1], o.pad[2], o.pad[3], o.neg_paren as u8, o.gray)
+        }
+        // CellFmt|left|right|top|bottom|shade — a line is `-` (not set)
+        // or 0 None … 6 Extra Thick
+        Code::CellFmt(f) => {
+            let side = |k: usize| f.lines[k].map(|s| (s as u8).to_string()).unwrap_or_else(|| "-".into());
+            format!("CellFmt|{}|{}|{}|{}|{}", side(0), side(1), side(2), side(3), f.shade as u8)
+        }
         Code::RevOn { del, author, date } => format!("Rev|{}|{}|{}", *del as u8, esc(author), esc(date)),
         Code::RevOff { del } => format!("RevOff|{}", *del as u8),
         Code::Cell => "Cell".into(),
@@ -261,6 +278,27 @@ pub fn str_to_code(s: &str) -> Option<Code> {
         "Tbl" => Code::TblDef { cols: p(1).split(',').filter_map(|x| x.parse().ok()).collect() },
         "Row" => Code::Row,
         "Join" => Code::Join { cols: p(1).parse().unwrap_or(1), rows: p(2).parse().unwrap_or(1) },
+        "TblOpt" => {
+            let d = TblOpt::default();
+            let pad = |k: usize| p(k + 2).parse::<i32>().map(|v| v.max(0)).unwrap_or(d.pad[k]);
+            Code::TblOpt(TblOpt {
+                header_rows: p(1).parse().unwrap_or(0),
+                pad: [pad(0), pad(1), pad(2), pad(3)],
+                neg_paren: p(6) == "1",
+                pos: match p(7) {
+                    "R" => TblPos::Right,
+                    "C" => TblPos::Center,
+                    "F" => TblPos::Full,
+                    "S" => TblPos::Set(p(8).parse().unwrap_or(0)),
+                    _ => TblPos::Left,
+                },
+                gray: p(9).parse::<u8>().map(|g| g.min(100)).unwrap_or(d.gray),
+            })
+        }
+        "CellFmt" => {
+            let side = |k: usize| p(k + 1).parse::<usize>().ok().and_then(LineStyle::from_index);
+            Code::CellFmt(CellFmt { lines: [side(0), side(1), side(2), side(3)], shade: p(5) == "1" })
+        }
         "Rev" => Code::RevOn { del: p(1) == "1", author: unesc(p(2)), date: unesc(p(3)) },
         "RevOff" => Code::RevOff { del: p(1) == "1" },
         "Cell" => Code::Cell,
@@ -540,5 +578,26 @@ mod tests {
         let d2 = read(&s).unwrap();
         assert_eq!(d.els, d2.els);
         assert_eq!(d.init, d2.init);
+    }
+
+    #[test]
+    fn table_settings_roundtrip() {
+        let mut d = Document::new();
+        d.els = crate::tables::new_table(2, 2, 4800);
+        let opt = TblOpt { header_rows: 1, pad: [100, 0, 60, 30], neg_paren: true, pos: TblPos::Set(2040), gray: 45 };
+        d.els.insert(1, El::Code(Code::TblOpt(opt)));
+        for (k, style) in LineStyle::ALL.iter().enumerate() {
+            let mut f = CellFmt { shade: k % 2 == 0, ..Default::default() };
+            f.lines[k % 4] = Some(*style);
+            f.lines[(k + 1) % 4] = Some(LineStyle::ALL[6 - k]);
+            d.els.push(El::Code(Code::CellFmt(f)));
+        }
+        for pos in [TblPos::Left, TblPos::Right, TblPos::Center, TblPos::Full] {
+            d.els.push(El::Code(Code::TblOpt(TblOpt { pos, ..Default::default() })));
+        }
+        let s = write(&d);
+        assert!(s.contains("TblOpt|1|100|0|60|30|1|S|2040|45"), "{s}");
+        assert!(s.contains("CellFmt|0|6|-|-|1"), "{s}");
+        assert_eq!(read(&s).unwrap().els, d.els);
     }
 }

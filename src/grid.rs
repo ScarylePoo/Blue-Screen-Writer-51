@@ -29,6 +29,49 @@ pub mod pal {
     ];
 }
 
+/// The box-drawing characters where lines meet.  Per entry: which arms
+/// there are (left, right, up, down) and the character for horizontal
+/// single / vertical single, horizontal double / vertical single,
+/// horizontal single / vertical double, both double.
+pub const BOX_SETS: [([bool; 4], [char; 4]); 9] = [
+    ([false, true, false, true], ['┌', '╒', '╓', '╔']),
+    ([true, false, false, true], ['┐', '╕', '╖', '╗']),
+    ([false, true, true, false], ['└', '╘', '╙', '╚']),
+    ([true, false, true, false], ['┘', '╛', '╜', '╝']),
+    ([false, true, true, true], ['├', '╞', '╟', '╠']),
+    ([true, false, true, true], ['┤', '╡', '╢', '╣']),
+    ([true, true, false, true], ['┬', '╤', '╥', '╦']),
+    ([true, true, true, false], ['┴', '╧', '╨', '╩']),
+    ([true, true, true, true], ['┼', '╪', '╫', '╬']),
+];
+
+/// Where a line ends at a place where lines meet, so that double lines
+/// form clean corners and crossings.  For one of the two strokes of a
+/// double line (`double`): `side_a` = the line that leaves the meeting
+/// point at a right angle on this stroke's side is double, `side_b` = the
+/// one on the other side is.  For any other line: the two lines at right
+/// angles.  `opp`: the line goes on straight ahead.  Returns 1 = stop at
+/// the near stroke of the double line that crosses, 0 = go to the middle,
+/// -1 = go on to the far stroke (around the outside of a corner).
+pub fn rule_end(double: bool, opp: bool, side_a: bool, side_b: bool) -> i32 {
+    if double {
+        match (side_a, opp, side_b) {
+            (true, _, _) => 1,
+            (false, true, _) => 0,
+            (false, false, true) => -1,
+            (false, false, false) => 0,
+        }
+    } else if opp {
+        0
+    } else {
+        match (side_a, side_b) {
+            (true, true) => 1,
+            (false, false) => 0,
+            _ => -1,
+        }
+    }
+}
+
 pub const F_BOLD: u8 = 1;
 pub const F_ITALIC: u8 = 2;
 pub const F_UNDER: u8 = 4;
@@ -174,4 +217,28 @@ impl Grid {
 /// Number of display columns a string takes (one per char in text mode).
 pub fn width(s: &str) -> usize {
     s.chars().filter(|&c| c != '~').count()
+}
+
+#[cfg(test)]
+mod box_tests {
+    use super::*;
+    #[test]
+    fn line_ends() {
+        // a stroke of a double line: stops at a double line on its side,
+        // goes around a corner on the outside, else to the middle
+        assert_eq!(rule_end(true, false, true, false), 1);
+        assert_eq!(rule_end(true, false, false, true), -1);
+        assert_eq!(rule_end(true, true, false, true), 0);
+        assert_eq!(rule_end(true, false, false, false), 0);
+        // a single line ends at a double line across its way, and reaches
+        // the far stroke at a corner with one
+        assert_eq!(rule_end(false, false, true, true), 1);
+        assert_eq!(rule_end(false, false, true, false), -1);
+        assert_eq!(rule_end(false, true, true, true), 0);
+        // every junction character is there once
+        let mut all: Vec<char> = BOX_SETS.iter().flat_map(|(_, set)| set.iter().copied()).collect();
+        all.sort_unstable();
+        all.dedup();
+        assert_eq!(all.len(), 36);
+    }
 }

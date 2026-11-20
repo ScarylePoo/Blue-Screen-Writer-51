@@ -96,6 +96,43 @@ pub fn code_text(c: &Code) -> String {
         }
         Code::Row => "[Row]".into(),
         Code::Join { cols, rows } => format!("[Join:{cols}x{rows}]"),
+        Code::TblOpt(o) => {
+            // only what differs from the defaults
+            let d = TblOpt::default();
+            let mut parts: Vec<String> = vec![];
+            if o.header_rows != 0 {
+                parts.push(format!("Hdr {}", o.header_rows));
+            }
+            if o.pad != d.pad {
+                parts.push(format!("Spacing {}", o.pad.iter().map(|p| fmt_inches(*p)).collect::<Vec<_>>().join(",")));
+            }
+            if o.neg_paren {
+                parts.push("Neg ()".into());
+            }
+            match o.pos {
+                TblPos::Left => {}
+                TblPos::Right => parts.push("Pos Right".into()),
+                TblPos::Center => parts.push("Pos Center".into()),
+                TblPos::Full => parts.push("Pos Full".into()),
+                TblPos::Set(x) => parts.push(format!("Pos {}", fmt_inches(x))),
+            }
+            if o.gray != d.gray {
+                parts.push(format!("Gray {}%", o.gray));
+            }
+            format!("[Tbl Opt:{}]", parts.join(";"))
+        }
+        Code::CellFmt(f) => {
+            let mut parts: Vec<String> = vec![];
+            for (k, side) in CellFmt::SIDES.iter().enumerate() {
+                if let Some(s) = f.lines[k] {
+                    parts.push(format!("{side} {}", s.name()));
+                }
+            }
+            if f.shade {
+                parts.push("Shade On".into());
+            }
+            format!("[Cell Lines:{}]", parts.join(";"))
+        }
         Code::Cell => "[Cell]".into(),
         Code::TblOff => "[Tbl Off]".into(),
         Code::ColDef { kind, cols } => crate::columns::reveal_text(*kind, cols),
