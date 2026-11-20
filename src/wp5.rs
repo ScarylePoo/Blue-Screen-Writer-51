@@ -216,6 +216,91 @@ fn paper_of(c: &Code) -> Option<(i32, i32)> {
     }
 }
 
+/// The lines and shading in a 5.1 row code, one pair of bytes per column.
+/// The code holds two blocks (the row before and this row), each: a flag
+/// byte, the row height (word), 0x80 + length, then the pairs; `n 0x80`
+/// before a pair repeats it n times.  First byte: left line (bits 3-5)
+/// and top line (bits 0-2); second: shaded (bit 6), right line (bits 3-5)
+/// and bottom line (bits 0-2).  0 none, 1 single, 2 double, 3 dashed,
+/// 4 dotted, 5 thick, 6 extra thick.
+fn row_lines(p: &[u8], ncols: usize) -> Option<Vec<(u8, u8)>> {
+    let n1 = *p.get(3)?;
+    if n1 & 0x80 == 0 {
+        return None;
+    }
+    let k = 4 + (n1 & 0x7F) as usize;
+    let n2 = *p.get(k + 3)?;
+    if n2 & 0x80 == 0 {
+        return None;
+    }
+    let d = p.get(k + 4..k + 4 + (n2 & 0x7F) as usize)?;
+    let mut v = Vec::new();
+    let mut j = 0;
+    while j + 1 < d.len() {
+        if d[j + 1] == 0x80 {
+            let pair = (*d.get(j + 2)?, *d.get(j + 3)?);
+            v.extend(std::iter::repeat(pair).take(d[j] as usize));
+            j += 4;
+        } else {
+            v.push((d[j], d[j + 1]));
+            j += 2;
+        }
+    }
+    (v.len() == ncols && ncols > 0).then_some(v)
+}
+
+/// The `[Cell Lines]` of the cell at row `r`, column `c` (joined over `cs`
+/// columns and `rs` rows) from the rows' line bytes: only what differs
+/// from the standard lines (double outside, single inside).  5.1 keeps a
+/// right and a bottom line of its own for a cell (0 inside the table =
+/// the neighbour's line); where both sides have one, the cell to the
+/// right or below counts here.
+fn cell_lines(rows: &[Option<Vec<(u8, u8)>>], r: usize, c: usize, cs: usize, rs: usize) -> CellFmt {
+    let style = |n: u8| LineStyle::ALL.get((n & 7) as usize).copied().unwrap_or(LineStyle::Single);
+    let at = |r: usize, c: usize| rows.get(r).and_then(|x| x.as_ref()).and_then(|x| x.get(c)).copied();
+    let mut f = CellFmt::default();
+    let Some((a, b)) = at(r, c) else { return f };
+    let ncols = rows.get(r).and_then(|x| x.as_ref()).map_or(0, |x| x.len());
+    let (lastc, lastr) = ((c + cs).max(1) - 1, (r + rs).max(1) - 1);
+    f.shade = b & 0x40 != 0;
+    let (left, top) = ((a >> 3) & 7, a & 7);
+    let right = at(r, lastc).map_or(0, |x| (x.1 >> 3) & 7);
+    let bottom = at(lastr, c).map_or(0, |x| x.1 & 7);
+    // left and top: the neighbour's own line shows where this cell has none
+    let before = if c > 0 { at(r, c - 1).map_or(0, |x| (x.1 >> 3) & 7) } else { 0 };
+    let above = if r > 0 { at(r - 1, c).map_or(0, |x| x.1 & 7) } else { 0 };
+    let std_left = if c == 0 { 2 } else { 1 };
+    let std_top = if r == 0 { 2 } else { 1 };
+    if left != std_left && !(left == 0 && before != 0) {
+        f.lines[0] = Some(style(left));
+    }
+    if top != std_top && !(top == 0 && above != 0) {
+        f.lines[2] = Some(style(top));
+    }
+    // right and bottom
+    if lastc + 1 >= ncols {
+        if right != 2 {
+            f.lines[1] = Some(style(right));
+        }
+    } else if right != 0 {
+        let next = at(r, lastc + 1).map_or(1, |x| (x.0 >> 3) & 7);
+        if right != 1 || next == 0 {
+            f.lines[1] = Some(style(right));
+        }
+    }
+    if lastr + 1 >= rows.len() {
+        if bottom != 2 {
+            f.lines[3] = Some(style(bottom));
+        }
+    } else if bottom != 0 {
+        let next = at(lastr + 1, c).map_or(1, |x| x.0 & 7);
+        if bottom != 1 || next == 0 {
+            f.lines[3] = Some(style(bottom));
+        }
+    }
+    f
+}
+
 fn code(c: Code) -> El {
     El::Code(c)
 }
@@ -342,6 +427,10 @@ impl Parser<'_> {
         // attributes of the open cell (bits as in ATTRS), the
         // justification before the table and the one last set in it
         let mut cell_attrs: u16 = 0;
+        // lines and shading: every row code lists them per column; they are
+        // put on the cells when the table ends
+        let mut tbl_lines: Vec<Option<Vec<(u8, u8)>>> = Vec::new();
+        let mut tbl_cells: Vec<(usize, usize, usize, usize, usize)> = Vec::new();
         let mut pre_just = Justify::Full;
         let mut tbl_just: Option<Justify> = None;
         // start of a cached style expansion (after a style code)
@@ -453,6 +542,8 @@ impl Parser<'_> {
                             cell_attrs = 0;
                             rows = 0;
                             cells = 0;
+                            tbl_lines.clear();
+                            tbl_cells.clear();
                             i = end;
                             continue;
                         }
@@ -464,6 +555,7 @@ impl Parser<'_> {
                             if rows == 0 {
                                 out.push(code(Code::Row));
                                 rows = 1;
+                                tbl_lines.push(None);
                             }
                             // cells hidden under a cell joined across
                             // (offsets count from the start of the group: 4 bytes of header,
@@ -478,6 +570,9 @@ impl Parser<'_> {
                             cells += 1;
                             let from_above = g.b(4) & 0x80 != 0 || g.b(6) & 0x80 != 0;
                             let (cs, rs) = ((g.b(6) & 0x7F).max(1), g.b(7).max(1));
+                            if !from_above {
+                                tbl_cells.push((out.len() - 1, rows as usize - 1, col as usize, cs as usize, rs as usize));
+                            }
                             if !from_above && (cs > 1 || rs > 1) {
                                 out.push(code(Code::Join { cols: cs, rows: rs }));
                             }
@@ -518,6 +613,7 @@ impl Parser<'_> {
                             out.push(code(Code::Row));
                             rows += 1;
                             cells = 0;
+                            tbl_lines.push(row_lines(g.p, tbl_cols.unwrap_or(0) as usize));
                             i = end;
                             continue;
                         }
@@ -527,6 +623,15 @@ impl Parser<'_> {
                                 out.push(code(Code::Cell));
                                 cells += 1;
                             }
+                            for &(at, r, c, cs, rs) in tbl_cells.iter().rev() {
+                                let f = cell_lines(&tbl_lines, r, c, cs, rs);
+                                if !f.is_default() {
+                                    let at = at + 1 + matches!(out.get(at + 1), Some(El::Code(Code::Join { .. }))) as usize;
+                                    out.insert(at, code(Code::CellFmt(f)));
+                                }
+                            }
+                            tbl_cells.clear();
+                            tbl_lines.clear();
                             out.push(code(Code::TblOff));
                             if tbl_just.take().is_some_and(|j| j != pre_just) {
                                 out.push(code(Code::Just(pre_just)));
@@ -1688,6 +1793,39 @@ mod tests {
         let doc2 = st.iter().find(|s| s.name == "Document 2").expect("outline style");
         assert_eq!(doc2.kind, StyleKind::Outline);
         assert!(doc2.on.iter().any(|e| matches!(e, El::Code(Code::ParNum(Some(2))))), "{:?}", doc2.on);
+    }
+
+    #[test]
+    fn wp5_table_lines() {
+        // row codes of a 5 x 4 table with edited lines (second block = the row)
+        let h = |x: &str| -> Vec<u8> { x.split(' ').map(|b| u8::from_str_radix(b, 16).unwrap()).collect() };
+        let rows: Vec<Option<Vec<(u8, u8)>>> = [
+            "03 07 02 88 1b 03 0b 04 0b 02 0b 1e 03 07 02 88 1b 03 0b 04 0b 02 0b 1e 00 00",
+            "03 07 02 88 1b 03 0b 04 0b 02 0b 1e 03 a1 01 88 1a 09 02 80 09 00 09 18 00 00",
+            "03 a1 01 88 1a 09 02 80 09 00 09 18 03 81 01 88 19 00 1b 1b 09 00 09 18 07 02",
+            "03 81 01 88 19 00 1b 1b 09 00 09 18 03 71 01 88 19 00 02 80 09 00 09 18 a8 03",
+            "03 71 01 88 19 00 02 80 09 00 09 18 03 a1 01 88 19 03 02 80 09 03 09 1b 29 05",
+        ]
+        .iter()
+        .map(|r| row_lines(&h(r), 4))
+        .collect();
+        assert!(rows.iter().all(|r| r.is_some()), "{rows:?}");
+        assert_eq!(rows[1].as_ref().unwrap()[2], (0x09, 0x00), "run of two");
+        use LineStyle as L;
+        let f = |r, c| cell_lines(&rows, r, c, 1, 1).lines;
+        assert_eq!(f(0, 0), [Some(L::Dashed), None, Some(L::Dashed), Some(L::Dashed)]);
+        assert_eq!(f(0, 3), [None, Some(L::Dashed), Some(L::Dashed), Some(L::ExtraThick)]);
+        assert_eq!(f(0, 1), [None, None, Some(L::Dashed), Some(L::Dotted)]);
+        assert_eq!(f(1, 0), [Some(L::Dashed), None, Some(L::Double), None]);
+        assert_eq!(f(1, 1), [None; 4]);
+        assert_eq!(f(2, 1), [Some(L::Dashed); 4]);
+        assert_eq!(f(4, 2), [None, None, None, Some(L::Dashed)]);
+        // a table without lines, and a shaded cell
+        let none = vec![row_lines(&h("03 00 00 84 04 80 09 00 03 40 01 84 04 80 00 00 00 00"), 4)];
+        assert_eq!(cell_lines(&none, 0, 3, 1, 1).lines, [Some(LineStyle::None); 4]);
+        let sh = vec![row_lines(&h("03 40 01 84 04 80 00 00 03 85 01 88 12 40 02 80 0a 00 0a 10 8b 06"), 4)];
+        assert!(cell_lines(&sh, 0, 0, 1, 1).shade && !cell_lines(&sh, 0, 1, 1, 1).shade);
+        assert_eq!(row_lines(&h("03 00 00"), 4), Option::None);
     }
 
     #[test]

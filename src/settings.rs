@@ -109,7 +109,17 @@ pub fn config_dir() -> PathBuf {
     #[cfg(not(windows))]
     {
         if let Some(h) = std::env::var_os("HOME") {
-            return PathBuf::from(h).join(".config/blue-screen-writer-51");
+            let old = PathBuf::from(&h).join(".config/blue-screen-writer-51");
+            // macOS: the usual place is Application Support; a folder from
+            // an earlier version moves there (or stays in use if it can't)
+            if cfg!(target_os = "macos") {
+                let new = PathBuf::from(&h).join("Library/Application Support/Blue Screen Writer 51");
+                if !new.exists() && old.exists() && std::fs::rename(&old, &new).is_err() {
+                    return old;
+                }
+                return new;
+            }
+            return old;
         }
     }
     PathBuf::from(".")

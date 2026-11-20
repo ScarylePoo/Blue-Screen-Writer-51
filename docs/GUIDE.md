@@ -21,7 +21,7 @@ Double-click **bsw51.exe** in the folder *Blue Screen Writer 51*. Keep the folde
 
 You can make Windows open documents in Blue Screen Writer 51 when you double-click them in Explorer or in an e-mail.
 
-1. Press **Shift-F1** (Setup), then **7** (Windows: open .docx/.doc/.wpd files), then **1** (Register and choose as default).
+1. Press **Shift-F1** (Setup), then **7** (Windows: open .docx/.wpd… files), then **1** (Register and choose as default).
 2. The Windows "Default apps" window opens. Choose *Blue Screen Writer 51* for .docx, .doc and any other types you want.
 
 To undo this, use Shift-F1, 7, 2.

@@ -69,7 +69,7 @@ To choose a fixed screen size, go to **Shift-F1**, **2** Display, **5** Screen S
 
 As in 5.1, a start-up switch sets a text screen of any size for one session: `/ss=rows,columns`, for example `bsw51 /ss=43,80` (on a Mac: `open -a "Blue Screen Writer 51" --args /ss=43,80`). Rows can be 25 to 200, columns 80 to 400.
 
-To use the switch every time without typing it (for example on a Mac, where a program is not normally started with switches), put it in a text file called `startup.txt` in the settings folder (`%APPDATA%\Blue Screen Writer 51` on Windows, `~/.config/blue-screen-writer-51` on Linux and macOS), for example a single line `/ss=43,80`.
+To use the switch every time without typing it (for example on a Mac, where a program is not normally started with switches), put it in a text file called `startup.txt` in the settings folder (`%APPDATA%\Blue Screen Writer 51` on Windows, `~/.config/blue-screen-writer-51` on Linux, `~/Library/Application Support/Blue Screen Writer 51` on macOS), for example a single line `/ss=43,80`.
 
 When a document contains Chinese, Japanese or Korean text, the screen uses a few more columns so that whole lines stay visible.
 

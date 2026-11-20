@@ -13,7 +13,7 @@ Setup
      4 - Initial Settings
      5 - Keyboard Layout                         ALTRNAT (built in)
      6 - Location of Files
-     7 - Windows: open .docx/.doc/.wpd… files    with Blue Screen Writer 51
+     7 - Windows: open .docx/.wpd… files         with Blue Screen Writer 51
 ```
 
 ## 1 Mouse
@@ -116,7 +116,7 @@ Opens the list of `.WPK` keyboard files: select, create, edit or map keyboards, 
 
 A folder that does not exist is refused with `ERROR: Directory not found`.
 
-## 7 Windows: open .docx/.doc/.wpd… files
+## 7 Windows: open .docx/.wpd… files
 
 | Choice | What it does |
 |---|---|

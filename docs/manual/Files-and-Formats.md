@@ -110,7 +110,7 @@ Shift-F10 and F5 open almost any word-processor file. The program recognises the
 | Plain text in any common encoding | .txt and others |
 | Blue Screen Writer 51 code stream | .bsw (written by Ctrl-F5, 3, 7; older versions used .wps) |
 
-**WordPerfect 5.1 tables** come in as real tables, with their column widths, position, joined cells, and each cell's justification and attributes. The line styles and shading set in 5.1's Table Edit are not read yet: such a table gets the standard lines (double outside, single inside).
+**WordPerfect 5.1 tables** come in as real tables, with their column widths, position, joined cells, line styles, shaded cells, and each cell's justification and attributes. Where 5.1 keeps two different lines on the same edge (the bottom line of one cell and the top line of the cell below), the line of the lower or right-hand cell is shown.
 
 **Outlook e-mails (.msg)** are shown with From, To, Date, Subject and the names of the attachments, followed by the message text.
 

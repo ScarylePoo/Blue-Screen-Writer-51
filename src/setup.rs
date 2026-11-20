@@ -52,7 +52,7 @@ pub fn setup_menu(wp: &mut Wp) {
         item('6', "~Location of Files", |_| vec![], Edit::Sub(Rc::new(|_| locations()))),
         item(
             '7',
-            "~Windows: open .docx/.doc/.wpd… files",
+            "~Windows: open .docx/.wpd… files",
             |_| vec!["with Blue Screen Writer 51".into()],
             Edit::Choice(
                 vec!["Register and choose as default", "Remove registration"],
