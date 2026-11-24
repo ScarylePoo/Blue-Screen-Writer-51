@@ -71,6 +71,8 @@ As in 5.1, a start-up switch sets a text screen of any size for one session: `/s
 
 To use the switch every time without typing it (for example on a Mac, where a program is not normally started with switches), put it in a text file called `startup.txt` in the settings folder (`%APPDATA%\Blue Screen Writer 51` on Windows, `~/.config/blue-screen-writer-51` on Linux, `~/Library/Application Support/Blue Screen Writer 51` on macOS), for example a single line `/ss=43,80`.
 
+The easy way to get the file there: drag a file called `startup.txt` (or `settings.txt`) onto the program window. The program asks `1 Copy to the settings folder; 2 Open as text` and, if such a file is already there, `Replace …? No (Yes)`. Copied settings apply at once, `startup.txt` at the next start. **Shift-F1**, **6**, **8** opens the settings folder itself.
+
 When a document contains Chinese, Japanese or Korean text, the screen uses a few more columns so that whole lines stay visible.
 
 ### Colours

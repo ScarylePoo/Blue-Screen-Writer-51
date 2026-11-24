@@ -83,7 +83,9 @@ pub fn open_external(target: &str) -> Result<(), String> {
 
 #[cfg(not(windows))]
 pub fn open_external(target: &str) -> Result<(), String> {
-    std::process::Command::new("xdg-open").arg(target).spawn().map(|_| ()).map_err(|e| e.to_string())
+    // macOS has `open`; Linux desktops have `xdg-open`
+    let cmd = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(cmd).arg(target).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Enter in Reveal Codes with the cursor on a `[Link:…]` code.

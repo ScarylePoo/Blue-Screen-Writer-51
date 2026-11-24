@@ -161,7 +161,7 @@ Saves a **copy** in another format. The document on the screen keeps its own nam
 
 ```
 1 Word (.docx); 2 PDF; 3 OpenDocument (.odt); 4 RTF; 5 HTML (e-mail); 6 Text;
-7 Blue Screen Writer stream (.bsw); 8 Flat ODF (.fodt); 9 ODF Template (.ott)
+7 BSW stream (.bsw); 8 Flat ODF (.fodt); 9 ODF Template (.ott)
 ```
 
 1. Choose the format.

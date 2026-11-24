@@ -113,6 +113,7 @@ Opens the list of `.WPK` keyboard files: select, create, edit or map keyboards, 
 | **2 Keyboard/Macro Files** | Folder for `.WPM` macros and `.WPK` keyboards. | The `WPM` folder next to the program, then the program folder |
 | **5 Style Files** and **Library Filename** | Folder for style files, and the style library used by Alt-F8. | `STYLE\LIBRARY.STY` next to the program, if it exists |
 | **7 Documents (home directory)** | Your home directory: the program starts in it, and **F5 always suggests it**, even after you looked at other folders. In F5, typing **=** changes it. | None: F5 suggests the current folder, starting with the folder the program was started from |
+| **8 Settings Folder (open it)** | Not a setting: shows where the program keeps `settings.txt`, `startup.txt`, revisions and recovery copies (on a Mac also your macros, in `WPM`), and pressing **8** opens that folder in Explorer, Finder or the file manager. | — |
 
 A folder that does not exist is refused with `ERROR: Directory not found`.
 

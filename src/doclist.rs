@@ -169,4 +169,40 @@ mod tests {
         assert_eq!(wp.cur, 0);
         assert_eq!(wp.docs[0].doc.plain_text(0, 99), "dropped text");
     }
+
+    #[test]
+    fn a_dropped_startup_file_is_offered_for_the_settings_folder() {
+        let _ = crate::settings::CONFIG_OVERRIDE.set(std::env::temp_dir().join(format!("bsw51-dropcfg-{}", std::process::id())));
+        let dest = crate::settings::config_dir().join("startup.txt");
+        let _ = std::fs::remove_file(&dest);
+        let dir = std::env::temp_dir().join(format!("bsw51-drop2-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = dir.join("startup.txt");
+        std::fs::write(&p, "/ss=43,80").unwrap();
+        // 2: open as text, nothing copied
+        let mut wp = Wp::new(80, 25);
+        wp.open_dropped(&p);
+        assert!(wp.docs[0].is_empty(), "asked first");
+        typed(&mut wp, "2");
+        assert_eq!(wp.docs[0].doc.plain_text(0, 99), "/ss=43,80");
+        assert!(!dest.exists());
+        // 1: copied; an existing file is only replaced after Yes
+        let mut wp = Wp::new(80, 25);
+        wp.open_dropped(&p);
+        typed(&mut wp, "1");
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "/ss=43,80");
+        assert!(wp.docs[0].is_empty());
+        std::fs::write(&p, "/ss=50,100").unwrap();
+        wp.open_dropped(&p);
+        typed(&mut wp, "1n");
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "/ss=43,80");
+        wp.open_dropped(&p);
+        typed(&mut wp, "1y");
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "/ss=50,100");
+        // the file in the settings folder itself opens as a document
+        let mut wp = Wp::new(80, 25);
+        wp.open_dropped(&dest);
+        assert_eq!(wp.docs[0].doc.plain_text(0, 99), "/ss=50,100");
+        let _ = std::fs::remove_file(&dest);
+    }
 }

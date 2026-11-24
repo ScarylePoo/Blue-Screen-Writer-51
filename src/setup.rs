@@ -374,6 +374,25 @@ fn locations() -> Box<dyn Screen> {
             |wp| wp.settings.default_dir.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
             |s, p| s.default_dir = p,
         ),
+        // not in 5.1: the folder with settings.txt, startup.txt, the
+        // macros (WPM), revisions and recovery copies, opened in the
+        // system's file manager
+        item(
+            '8',
+            "S~ettings Folder (open it)",
+            |_| vec![crate::settings::config_dir().display().to_string()],
+            Edit::Action(Rc::new(|wp| {
+                let d = crate::settings::config_dir();
+                let _ = std::fs::create_dir_all(&d);
+                wp.flash(&format!("Opening {}", d.display()));
+                if crate::links::HEADLESS.load(std::sync::atomic::Ordering::Relaxed) || cfg!(test) {
+                    return;
+                }
+                if let Err(e) = crate::links::open_external(&d.display().to_string()) {
+                    wp.flash(&format!("ERROR: Can't open {} — {e}", d.display()));
+                }
+            })),
+        ),
     ];
     Form::new("Setup: Location of Files", items)
 }

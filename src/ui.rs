@@ -447,6 +447,49 @@ impl Wp {
             self.flash("Finish what is on the screen first, then drop the file again");
             return;
         }
+        // a settings.txt or startup.txt from somewhere else: offer to put
+        // it into the settings folder (or open it as text, as any file)
+        let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+        let dest = crate::settings::config_dir().join(&name);
+        if (name == "settings.txt" || name == "startup.txt") && !crate::history::same_path(p, &dest) {
+            let src = p.to_path_buf();
+            self.push(MenuLine::new(&["~Copy to the settings folder", "~Open as text"], move |wp, k| {
+                if k != 0 {
+                    wp.open_dropped_doc(&src);
+                    return None;
+                }
+                if !dest.exists() {
+                    wp.install_settings_file(&src, &dest);
+                    return None;
+                }
+                let q = format!("Replace {}?", dest.display());
+                Some(YesNo::new(&q, false, move |wp, yes| {
+                    if yes {
+                        wp.install_settings_file(&src, &dest);
+                    }
+                    None
+                }) as Box<dyn Screen>)
+            }));
+            return;
+        }
+        self.open_dropped_doc(p);
+    }
+
+    /// Copy a dropped settings.txt / startup.txt into the settings folder
+    /// (made if missing); new settings apply at once.
+    fn install_settings_file(&mut self, src: &Path, dest: &Path) {
+        let done = dest.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::copy(src, dest));
+        match done {
+            Err(e) => self.flash(&format!("ERROR: Can't copy to {} — {e}", dest.display())),
+            Ok(_) if dest.file_name().is_some_and(|n| n == "startup.txt") => self.flash(&format!("Copied to {} — it applies at the next start", dest.display())),
+            Ok(_) => {
+                crate::settings::Settings::load().apply(self);
+                self.flash(&format!("Settings copied to {}", dest.display()));
+            }
+        }
+    }
+
+    fn open_dropped_doc(&mut self, p: &Path) {
         if self.doc_in_use(self.cur) {
             match (0..self.docs.len()).find(|&k| !self.doc_in_use(k)) {
                 Some(k) => self.switch_to(k),
