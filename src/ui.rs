@@ -1617,6 +1617,13 @@ impl Wp {
                 if is_md && markdown_loses(&self.docs[cur].doc) {
                     self.flash("Note: Markdown keeps text, headings, lists, links and tables — other formatting is not saved");
                 }
+                // a WordPerfect 5.1 file cannot hold everything either
+                if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("wp5")) {
+                    let lost = crate::wp5w::report(&self.docs[cur].doc).1;
+                    if !lost.is_empty() {
+                        self.flash(&format!("Note: not kept in the 5.1 file: {}", lost.join(", ")));
+                    }
+                }
             }
             Err(e) => self.flash(&format!("ERROR: Can't save file — {e}")),
         }

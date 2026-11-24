@@ -1,6 +1,6 @@
 # Open items
 
-State of version 1.5.3 (2026-11-23).  Everything in the original feature backlog
+State of version 1.6.0 (2026-11-24).  Everything in the original feature backlog
 (autosave and crash recovery, revisions, track changes, mouse, columns, graphics,
 styles, outlines, merge/sort, mark text, RTL and CJK, Linux/macOS builds, home
 directory) is done.

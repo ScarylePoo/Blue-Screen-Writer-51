@@ -9,6 +9,8 @@ static TSV: &str = include_str!("../docs/formats/wp5_charsets.tsv");
 struct Tables {
     to_uni: HashMap<(u8, u16), String>,
     from_uni: HashMap<char, (u8, u16)>,
+    /// WP characters that are more than one code point (a letter and its accent).
+    from_multi: HashMap<String, (u8, u16)>,
 }
 
 fn tables() -> &'static Tables {
@@ -16,6 +18,7 @@ fn tables() -> &'static Tables {
     T.get_or_init(|| {
         let mut to_uni = HashMap::new();
         let mut from_uni = HashMap::new();
+        let mut from_multi = HashMap::new();
         for line in TSV.lines() {
             if line.starts_with('#') || line.starts_with("set\t") {
                 continue;
@@ -33,10 +36,12 @@ fn tables() -> &'static Tables {
             let mut it = s.chars();
             if let (Some(c), None) = (it.next(), it.next()) {
                 from_uni.entry(c).or_insert((set, idx));
+            } else {
+                from_multi.entry(s.clone()).or_insert((set, idx));
             }
             to_uni.insert((set, idx), s);
         }
-        Tables { to_uni, from_uni }
+        Tables { to_uni, from_uni, from_multi }
     })
 }
 
@@ -66,6 +71,12 @@ pub fn unicode_to_wp(c: char) -> Option<(u8, u16)> {
         return Some(((v / 256) as u8, (v % 256) as u16));
     }
     tables().from_uni.get(&c).copied()
+}
+
+/// The WP character for a letter with combining marks (`е` + U+0301), if
+/// the character sets have it as one character.
+pub fn str_to_wp(s: &str) -> Option<(u8, u16)> {
+    tables().from_multi.get(s).copied()
 }
 
 #[cfg(test)]

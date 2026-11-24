@@ -346,6 +346,11 @@ fn write_atomic(p: &Path, data: &[u8]) -> std::io::Result<()> {
     }
 }
 
+/// Write a finished file (atomically, with the backup of the old one).
+pub fn save_bytes(p: &Path, data: &[u8]) -> std::io::Result<()> {
+    write_atomic(p, data)
+}
+
 pub fn save(p: &Path, doc: &Document) -> std::io::Result<()> {
     let ext = p.extension().map(|e| e.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     match ext.as_str() {
@@ -360,6 +365,7 @@ pub fn save(p: &Path, doc: &Document) -> std::io::Result<()> {
         "fodt" => write_atomic(p, crate::odt::write_fodt(doc).as_bytes()),
         "htm" | "html" => write_atomic(p, crate::export::to_html(doc).as_bytes()),
         "md" | "markdown" => write_atomic(p, crate::fmt_md::write(doc).as_bytes()),
+        "wp5" => write_atomic(p, &crate::wp5w::write(doc)),
         _ => match &doc.password {
             Some(pw) if !pw.is_empty() => write_atomic(p, &crate::agile::encrypt(&docx::write_docx(doc)?, pw)),
             _ => write_atomic(p, &docx::write_docx(doc)?),

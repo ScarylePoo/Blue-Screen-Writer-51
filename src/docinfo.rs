@@ -291,9 +291,12 @@ const FORMATS: [(&str, &str); 9] = [
     ("~HTML (e-mail)", "html"),
     ("~Text", "txt"),
     ("BSW ~stream (.bsw)", "bsw"),
-    ("~Flat ODF (.fodt)", "fodt"),
-    ("ODF Te~mplate (.ott)", "ott"),
+    ("WordP~erfect 5.1 (.wp5)", "wp5"),
+    ("~More", ""),
 ];
+
+/// The formats behind 9 More.
+const MORE: [(&str, &str); 2] = [("~Flat ODF (.fodt)", "fodt"), ("ODF ~Template (.ott)", "ott")];
 
 /// Ctrl-F5, 3 Save As.
 pub fn save_as_menu() -> Box<dyn Screen> {
@@ -303,6 +306,10 @@ pub fn save_as_menu() -> Box<dyn Screen> {
         if ext == "txt" {
             let names: Vec<&str> = vec!["~UTF-8", "~Windows-1252 (Western)", "~DOS 850", "Windows-1251 (~Cyrillic)"];
             return Some(MenuLine::new(&names, |wp, k| Some(save_prompt(wp, "txt", Some(crate::export::TextEnc::ALL[k])))) as Box<dyn Screen>);
+        }
+        if ext.is_empty() {
+            let names: Vec<&str> = MORE.iter().map(|f| f.0).collect();
+            return Some(MenuLine::new(&names, |wp, k| Some(save_prompt(wp, MORE[k].1, None))) as Box<dyn Screen>);
         }
         Some(save_prompt(wp, ext, None))
     })
@@ -341,6 +348,17 @@ pub fn save_as(wp: &mut Wp, p: &std::path::Path, ext: &str, enc: Option<crate::e
                 wp.flash(&format!("Saved {name} ({})", enc.name()));
             }
         }),
+        // a WordPerfect 5.1 file cannot hold everything: say what was left out
+        ("wp5", _) => {
+            let (bytes, lost) = crate::wp5w::report(&doc);
+            crate::fileio::save_bytes(p, &bytes).map(|()| {
+                if lost.is_empty() {
+                    wp.flash(&format!("Saved {name}"));
+                } else {
+                    wp.flash(&format!("Saved {name} — not kept: {}", lost.join(", ")));
+                }
+            })
+        }
         _ => crate::fileio::save(p, &doc).map(|()| wp.flash(&format!("Saved {name}"))),
     };
     if let Err(e) = res {

@@ -121,7 +121,7 @@ Switch in **Shift-F1**, **3**, **9**. A `.WPK` keyboard file (Shift-F1, 5) can c
 | Keys | Function |
 |---|---|
 | **Ctrl-F5**, **2** | Password (Word-compatible encryption) |
-| **Ctrl-F5**, **3** | Save As: Word, PDF, ODT, RTF, HTML, Text (4 encodings), .bsw, Flat ODF, ODF Template |
+| **Ctrl-F5**, **3** | Save As: Word, PDF, ODT, RTF, HTML, Text (4 encodings), .bsw, WordPerfect 5.1, More (Flat ODF, ODF Template) |
 | **Ctrl-F5**, **4** | Comment |
 | **Ctrl-F5**, **5** | Spreadsheet (Excel .xlsx, CSV) |
 | **Ctrl-F5**, **6** | Revisions (every saved version) |

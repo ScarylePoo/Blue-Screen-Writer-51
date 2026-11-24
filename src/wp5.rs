@@ -15,10 +15,10 @@ use crate::wpchars::wp_to_string;
 use std::collections::HashMap;
 
 /// Total size of fixed-length functions 0xC0..=0xCF (both code bytes included).
-const FIXED: [usize; 16] = [4, 9, 11, 3, 3, 5, 6, 7, 4, 5, 6, 6, 8, 10, 10, 12];
+pub(crate) const FIXED: [usize; 16] = [4, 9, 11, 3, 3, 5, 6, 7, 4, 5, 6, 6, 8, 10, 10, 12];
 
 /// WP attribute number (C3/C4) → our attribute.
-const ATTRS: [Attr; 16] = [
+pub(crate) const ATTRS: [Attr; 16] = [
     Attr::ExtraLarge,
     Attr::VeryLarge,
     Attr::Large,
@@ -38,7 +38,7 @@ const ATTRS: [Attr; 16] = [
 ];
 
 /// Merge commands DE/0x20.. (TK).
-const MERGE: [&str; 68] = [
+pub(crate) const MERGE: [&str; 68] = [
     "ASSIGN", "BELL", "BREAK", "CALL", "CANCEL OFF", "CANCEL ON", "CASE", "CASE CALL", "CHAIN MACRO",
     "CHAIN PRIMARY", "CHAIN SECONDARY", "CHAR", "COMMENT", "CTON", "DATE", "DOCUMENT", "ELSE", "END FIELD",
     "END FOR", "END IF", "END RECORD", "END WHILE", "FIELD", "FOR", "FOR EACH", "GO", "IF", "IF BLANK",
@@ -520,14 +520,27 @@ impl Parser<'_> {
                                 1 => TblPos::Right,
                                 2 => TblPos::Center,
                                 3 => TblPos::Full,
+                                4 => TblPos::Set(g.w(base + 22) as i32),
                                 _ => TblPos::Left,
                             };
-                            if !matches!(out.last(), None | Some(El::Code(Code::HRt | Code::HPg))) {
+                            // a table starts a line of its own; page and
+                            // line format codes before it are no line
+                            let format = |e: &El| matches!(e, El::Code(Code::LRMargin { .. } | Code::TBMargin { .. } | Code::Just(_) | Code::LineSpacing(_) | Code::TabSet(_) | Code::Fmt(crate::fmt::Fmt::Paper(_))));
+                            if !matches!(out.iter().rev().find(|e| !format(e)), None | Some(El::Code(Code::HRt | Code::HPg))) {
                                 out.push(code(Code::HRt));
                             }
                             out.push(code(Code::TblDef { cols }));
-                            if pos != TblPos::Left {
-                                out.push(code(Code::TblOpt(TblOpt { pos, ..Default::default() })));
+                            // position, header rows, shading % and negative
+                            // numbers; the cell margins stay ours
+                            let opt = TblOpt {
+                                pos,
+                                header_rows: g.w(base + 16).min(255),
+                                neg_paren: g.b(base) & 0x20 != 0,
+                                gray: if (1..=100).contains(&g.b(base + 1)) { g.b(base + 1) } else { 10 },
+                                ..Default::default()
+                            };
+                            if !opt.is_default() {
+                                out.push(code(Code::TblOpt(opt)));
                             }
                             tbl_cols = Some(ncols as u32);
                             pre_just = out
@@ -923,9 +936,14 @@ impl Parser<'_> {
                 };
                 match els {
                     Some(mut els) => {
-                        // Numbering is automatic: drop the [Note Num] marker.
+                        // Numbering is automatic: drop the [Note Num] marker,
+                        // and the superscript around it (5.1's standard
+                        // style for the number in the note).
                         if let Some(k) = els.iter().position(|e| matches!(e, El::Code(Code::Unknown { name, .. }) if name == "Note Num")) {
                             els.remove(k);
+                            if k > 0 && els.get(k - 1) == Some(&code(Code::AttrOn(Attr::Superscript))) && els.get(k) == Some(&code(Code::AttrOff(Attr::Superscript))) {
+                                els.drain(k - 1..=k);
+                            }
                         }
                         let kind = if s == 0 { NoteKind::Foot } else { NoteKind::End };
                         out.push(code(Code::Note { kind, els }));

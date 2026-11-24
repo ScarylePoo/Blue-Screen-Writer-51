@@ -94,6 +94,7 @@ mod doclist;
 mod revisions;
 mod ui;
 mod wp5;
+mod wp5w;
 mod wpchars;
 mod wpk;
 mod wpm;

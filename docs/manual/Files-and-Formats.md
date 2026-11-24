@@ -22,7 +22,7 @@ Folders work the same way: *Documents*, *Desktop*, mapped network drives such as
 2. Press **Enter** to keep the name, or type a new name (with or without a folder) and press **Enter**.
 3. If a file with that name exists, you are asked `Replace <name>? No (Yes)`. Press **Y** to replace it, **N** to type another name.
 
-If you type a name **without an extension**, `.docx` is added. If you type another extension, the document is saved in that format: `.txt` (plain text), `.rtf`, `.odt`, `.ott`, `.fodt`, `.htm`/`.html`, `.md` (Markdown) or `.bsw` (the program's own code-stream format). Any other extension gives a Word document.
+If you type a name **without an extension**, `.docx` is added. If you type another extension, the document is saved in that format: `.txt` (plain text), `.rtf`, `.odt`, `.ott`, `.fodt`, `.htm`/`.html`, `.md` (Markdown), `.wp5` (WordPerfect 5.1) or `.bsw` (the program's own code-stream format). Any other extension gives a Word document.
 
 If you opened an old or foreign file (for example *LETTER.WP5*, *REPORT.DOC* or *notes.rtf*), F10 offers the same name ending in **.docx**. The old file stays untouched next to it.
 
@@ -160,11 +160,11 @@ Only Word documents (.docx) are saved encrypted. When you open an encrypted docu
 Saves a **copy** in another format. The document on the screen keeps its own name.
 
 ```
-1 Word (.docx); 2 PDF; 3 OpenDocument (.odt); 4 RTF; 5 HTML (e-mail); 6 Text;
-7 BSW stream (.bsw); 8 Flat ODF (.fodt); 9 ODF Template (.ott)
+1 Word (.docx); 2 PDF; 3 OpenDocument (.odt); 4 RTF; 5 HTML (e-mail);
+6 Text; 7 BSW stream (.bsw); 8 WordPerfect 5.1 (.wp5); 9 More: 0
 ```
 
-1. Choose the format.
+1. Choose the format. **9 More** shows two more formats: `1 Flat ODF (.fodt); 2 ODF Template (.ott)`.
 2. For **6 Text**, choose the encoding: **1** UTF-8, **2** Windows-1252 (Western), **3** DOS 850, **4** Windows-1251 (Cyrillic). If some characters do not exist in the chosen encoding, they are written as `?` and the status line tells you how many.
 3. Type the name at `Document to be saved:` (the current name with the new extension is offered) and press **Enter**.
 
@@ -177,7 +177,41 @@ Saves a **copy** in another format. The document on the screen keeps its own nam
 | HTML | Pasting into e-mails or web pages. |
 | Text | Plain text without formatting. |
 | .bsw stream | A plain-text file containing every code exactly; useful for troubleshooting. |
-| Flat ODF, ODF Template | Special OpenDocument variants. |
+| WordPerfect 5.1 (.wp5) | People who work with WordPerfect 5.1 for DOS or WordPerfect for Windows. See below. |
+| Flat ODF, ODF Template (under 9 More) | Special OpenDocument variants. |
+
+#### WordPerfect 5.1 files (.wp5)
+
+Choice **8** writes a WordPerfect 5.1 document, the format of WordPerfect 5.1 for DOS, which WordPerfect for Windows and LibreOffice also read. (The files were checked with LibreOffice and against real 5.1 files, not yet in WordPerfect itself: please report a file that WordPerfect does not open correctly.) Use it to give a document to somebody who works with one of these programs. Keep your own copy as a Word document (.docx), because a 5.1 file cannot hold everything.
+
+**Kept:**
+
+- the text, with all characters of the WordPerfect character sets (accented letters, Greek, Cyrillic, symbols, box-drawing characters);
+- hard returns, hard pages, tabs, indents, margin release, centre, flush right, hard spaces and hyphens;
+- all Font attributes (bold, underline, italics, the sizes and so on) and fonts with their size;
+- margins, justification, line spacing, tab settings, paper size, page numbering, suppress, centre page, widow/orphan protection, hyphenation and the other Format codes;
+- headers, footers, footnotes and endnotes;
+- tables: column widths, joined cells, the justification and attributes of cells, the table position, header rows, lines and shading;
+- text columns, graphics lines, graphics boxes with their text and captions, WPG pictures;
+- comments, date codes, merge codes, Mark Text codes (index, lists, table of contents, cross-references);
+- the document summary and the document initial codes;
+- codes of an opened WordPerfect 5.1 file that the program does not know. They go back into the file unchanged.
+
+**Changed:**
+
+- **Styles** are written as the codes they contain. The style names are lost.
+- **Paragraph numbers** are written as plain text (`1.`, `a.`).
+- **Tracked changes**: inserted text is written as redline, deleted text as strikeout.
+- **Pictures** that are not WPG graphics (PNG, JPEG): the box and its caption are kept, with the file name. The picture itself is not in the file.
+- **Equations**: the equation text is kept. WordPerfect shows the equation after you edit it there.
+- **Fonts**: WordPerfect chooses the nearest font of its own printer.
+- A character that WordPerfect does not have is written as its base letter, or as `?`.
+
+**Not kept:** hyperlinks and bookmarks (the text stays), spreadsheet links and table formulas (the results stay), paragraph number and math definitions, border options, the numbering method of box options, the password.
+
+After saving, the status line names what was not kept, for example `Saved LETTER.wp5 — not kept: hyperlinks (the text is kept) ×2`.
+
+WordPerfect works out line ends and page ends again when it opens the file. They can fall in other places than here, because it uses the fonts of its own printer.
 
 ### 4 to 8
 
